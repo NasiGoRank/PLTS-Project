@@ -26,6 +26,7 @@ HUAWEI_USERNAME
 HUAWEI_PASSWORD
 KEHUA_USERNAME
 KEHUA_PASSWORD
+KEHUA_ACCOUNTS_JSON
 HUAWEI_COOKIES_JSON
 REFRESH_SECRET
 ```
@@ -88,6 +89,12 @@ Before each scrape the backend validates the current authorization token. If it
 has expired, the backend reproduces Kehua's signed login request and uses the new
 token only in server memory for that scrape. Credentials and tokens are excluded
 from API responses and authentication summaries.
+
+To add more Kehua accounts, set `KEHUA_ACCOUNTS_JSON` to a JSON list containing
+`username`, `password`, `company_id`, `station_id`, `area_code`, and an
+optional `company_name` for each account. The legacy username/password remain
+the primary account. Sessions are isolated, request identifiers are rewritten
+and re-signed per account, and the normalized stations are merged into one fleet.
 
 Liveness-only smoke test:
 

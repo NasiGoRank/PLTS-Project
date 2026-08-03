@@ -80,6 +80,17 @@ test("selects Kehua daily, monthly, and yearly energy series", () => {
   assert.equal(getEnergySeries(kehua, "year").unit, "MWh");
 });
 
+test("prefers the selected Kehua station's account-specific charts", () => {
+  const location = {
+    ...kehua,
+    charts: {
+      daily_generation: { x: ["00:00", "01:00"], y: [0, 2.5] },
+    },
+  };
+
+  assert.deepEqual(getEnergySeries(location, "today").values, [0, 2.5]);
+});
+
 test("maps Huawei revenue periods to daily, monthly, and yearly vendor series", () => {
   assert.deepEqual(getRevenueSeries(huawei, "month").values, [100, 120, 130]);
   assert.deepEqual(getRevenueSeries(huawei, "month").labels, ["01", "02", "03"]);

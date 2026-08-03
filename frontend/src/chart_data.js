@@ -105,7 +105,7 @@ export function getEnergySeries(location, period) {
   }
 
   if (source === "kehua") {
-    const charts = location?.site?.charts || {};
+    const charts = location?.charts || location?.site?.charts || {};
     if (period === "today") {
       return xySeries(charts.daily_generation, {
         unit: "kWh",

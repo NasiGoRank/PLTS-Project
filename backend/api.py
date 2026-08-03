@@ -142,6 +142,7 @@ def summarize_sites(result: dict[str, Any]) -> dict[str, Any]:
 
 
 SAFE_AUTH_KEYS = {
+    "accounts",
     "auth_check_after_login",
     "auth_check_before_login",
     "authorization_found",
