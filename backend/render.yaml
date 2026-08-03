@@ -46,6 +46,12 @@ services:
         sync: false
       - key: HUAWEI_PASSWORD
         sync: false
+      - key: KEHUA_USERNAME
+        sync: false
+      - key: KEHUA_PASSWORD
+        sync: false
+      - key: KEHUA_ACCOUNTS_JSON
+        sync: false
       - key: HUAWEI_COOKIES_JSON
         sync: false
       - key: KEHUA_COOKIES_JSON

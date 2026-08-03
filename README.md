@@ -48,6 +48,7 @@ HUAWEI_USERNAME
 HUAWEI_PASSWORD
 KEHUA_USERNAME
 KEHUA_PASSWORD
+KEHUA_ACCOUNTS_JSON
 HUAWEI_COOKIES_JSON
 REFRESH_SECRET
 ```
@@ -55,6 +56,24 @@ REFRESH_SECRET
 For `HUAWEI_COOKIES_JSON`, paste the complete JSON cookie export. Do not wrap
 the whole JSON in an additional pair of quotes. Kehua can log in automatically
 with `KEHUA_USERNAME` and `KEHUA_PASSWORD`, so `KEHUA_COOKIES_JSON` is optional.
+Additional Kehua logins use `KEHUA_ACCOUNTS_JSON`. Each entry includes credentials
+and the non-secret identifiers used to rewrite the captured request template:
+
+```json
+[{
+  "name": "school-09",
+  "username": "replace-me",
+  "password": "replace-me",
+  "company_id": "1831",
+  "station_id": "17483",
+  "area_code": "2054",
+  "company_name": "SDN 09 JAKUT"
+}]
+```
+
+The original `KEHUA_USERNAME`/`KEHUA_PASSWORD` account remains supported. Each
+account receives an isolated session, and their stations are merged into one
+Kehua fleet in the normalized API response.
 
 The non-secret defaults are already declared in `render.yaml`:
 
@@ -172,4 +191,4 @@ npm run dev
 - Rotate any password or session token that was previously uploaded or committed.
 - Never put `SUPABASE_SECRET_KEY`, cookies, or passwords in Vercel.
 - Never use secrets in variables prefixed with `VITE_`; those values are shipped to browsers.
-- Store `KEHUA_USERNAME` and `KEHUA_PASSWORD` only on the backend. The backend refreshes Kehua authorization automatically when the current token expires.
+- Store all Kehua credentials, including `KEHUA_ACCOUNTS_JSON`, only on the backend. The backend refreshes each account's authorization automatically when its token expires.

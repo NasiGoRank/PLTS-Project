@@ -288,7 +288,13 @@ def check_auth(session: requests.Session, site: dict[str, Any], timeout: int) ->
     return {"checked": True, "success": success, "status_code": response.status_code, "body": body}
 
 
-def prepare_session(site_name: str, site: dict[str, Any], cookies_file: Path | None, timeout: int) -> tuple[requests.Session, dict[str, Any]]:
+def prepare_session(
+    site_name: str,
+    site: dict[str, Any],
+    cookies_file: Path | None,
+    timeout: int,
+    credentials: dict[str, Any] | None = None,
+) -> tuple[requests.Session, dict[str, Any]]:
     session = requests.Session()
     session.headers.update(build_base_headers(site))
     meta: dict[str, Any] = {"cookies": load_cookies_into_session(session, cookies_file, site)}
@@ -307,8 +313,8 @@ def prepare_session(site_name: str, site: dict[str, Any], cookies_file: Path | N
         auth = kehua_check_auth(session, site, timeout)
         meta["auth_check_before_login"] = auth
         if not auth.get("success"):
-            username = os.getenv("KEHUA_USERNAME")
-            password = os.getenv("KEHUA_PASSWORD")
+            username = credentials.get("username") if credentials else os.getenv("KEHUA_USERNAME")
+            password = credentials.get("password") if credentials else os.getenv("KEHUA_PASSWORD")
             if username and password:
                 meta["password_login"] = kehua_password_login(session, site, username, password, timeout)
                 meta["auth_check_after_login"] = kehua_check_auth(session, site, timeout)
@@ -316,6 +322,69 @@ def prepare_session(site_name: str, site: dict[str, Any], cookies_file: Path | N
                 meta["password_login"] = {"success": False, "reason": "credentials_not_configured"}
 
     return session, meta
+
+
+def load_kehua_accounts_from_env() -> list[dict[str, Any]]:
+    accounts: list[dict[str, Any]] = []
+    legacy_username = os.getenv("KEHUA_USERNAME", "").strip()
+    legacy_password = os.getenv("KEHUA_PASSWORD", "").strip()
+    if legacy_username and legacy_password:
+        accounts.append({
+            "name": "primary",
+            "username": legacy_username,
+            "password": legacy_password,
+            "use_shared_cookies": True,
+        })
+
+    raw = os.getenv("KEHUA_ACCOUNTS_JSON", "").strip()
+    if raw:
+        try:
+            configured = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"KEHUA_ACCOUNTS_JSON is not valid JSON: {exc.msg}") from exc
+        if not isinstance(configured, list):
+            raise RuntimeError("KEHUA_ACCOUNTS_JSON must be a JSON list")
+        for index, item in enumerate(configured, start=1):
+            if not isinstance(item, dict):
+                raise RuntimeError(f"KEHUA_ACCOUNTS_JSON item {index} must be an object")
+            username = str(item.get("username") or "").strip()
+            password = str(item.get("password") or "").strip()
+            if not username or not password:
+                raise RuntimeError(f"KEHUA_ACCOUNTS_JSON item {index} requires username and password")
+            account = {
+                "name": str(item.get("name") or f"additional_{index}"),
+                "username": username,
+                "password": password,
+            }
+            for key in ("company_id", "station_id", "area_code", "company_name"):
+                if item.get(key) not in (None, ""):
+                    account[key] = str(item[key])
+            accounts.append(account)
+
+    unique: list[dict[str, Any]] = []
+    seen_usernames: set[str] = set()
+    for account in accounts:
+        if account["username"] not in seen_usernames:
+            unique.append(account)
+            seen_usernames.add(account["username"])
+    return unique
+
+
+def prepare_kehua_account_call(call: dict[str, Any], account: dict[str, Any]) -> dict[str, Any]:
+    prepared = dict(call)
+    prepared["headers"] = dict(call.get("headers", {}) or {})
+    payload = parse_form_payload(str(call.get("payload_raw") or ""))
+    replacements = {
+        "companyId": account.get("company_id"),
+        "stationId": account.get("station_id"),
+        "areaCode": account.get("area_code"),
+        "companyName": account.get("company_name"),
+    }
+    for field, value in replacements.items():
+        if field in payload and value not in (None, ""):
+            payload[field] = str(value)
+    prepared["payload_raw"] = urlencode(payload)
+    return prepared
 
 
 def build_request_headers(session: requests.Session, call: dict[str, Any]) -> dict[str, str]:
@@ -519,8 +588,98 @@ def normalize_latest(results: list[dict[str, Any]]) -> dict[str, Any]:
     latest: dict[str, Any] = {"schema": "monitoring_current.v2", "by_site": {}, "updated_at": now_iso()}
     for site_result in results:
         site_name = site_result["site"]
-        latest["by_site"][site_name] = build_normalized_site(site_result)
+        account_results = site_result.get("account_results")
+        if site_name == "kehua" and isinstance(account_results, list) and account_results:
+            normalized_accounts = [build_normalized_site(item) for item in account_results]
+            latest["by_site"][site_name] = merge_normalized_sites(normalized_accounts)
+        else:
+            latest["by_site"][site_name] = build_normalized_site(site_result)
     return latest
+
+
+def merge_normalized_sites(sites: list[dict[str, Any]]) -> dict[str, Any]:
+    if len(sites) == 1:
+        site = sites[0]
+        for station in site.get("stations", []):
+            station.setdefault("charts", site.get("charts", {}))
+        return site
+
+    stations_by_id: dict[str, dict[str, Any]] = {}
+    for site in sites:
+        for station in site.get("stations", []):
+            key = str(station.get("station_id") or station.get("name") or "")
+            if not key:
+                continue
+            current = stations_by_id.setdefault(key, {})
+            current.update({field: value for field, value in station.items() if value not in (None, "")})
+            current.setdefault("charts", site.get("charts", {}))
+
+    sum_fields = {
+        "station_count", "connected_station_count", "disconnected_station_count",
+        "trouble_station_count", "no_device_station_count", "capacity_kwp",
+        "current_power_kw", "daily_energy_kwh", "monthly_energy_kwh",
+        "yearly_energy_kwh", "cumulative_energy_kwh", "monthly_income",
+        "cumulative_income", "inverter_count", "monthly_alarm_count",
+        "today_alarm_count", "last_month_alarm_count",
+    }
+    overview: dict[str, Any] = {}
+    for field in sum_fields:
+        values = [site.get("overview", {}).get(field) for site in sites]
+        numbers = [value for value in values if isinstance(value, (int, float))]
+        if numbers:
+            overview[field] = sum(numbers)
+    overview["station_count"] = len(stations_by_id)
+    for site in sites:
+        currency = site.get("overview", {}).get("income_currency")
+        if currency:
+            overview.setdefault("income_currency", currency)
+
+    scrape_status = {
+        field: sum(int(site.get("scrape_status", {}).get(field) or 0) for site in sites)
+        for field in ("success_count", "failed_count", "auth_error_count")
+    }
+
+    devices: dict[str, Any] = {}
+    for list_name, identity_fields in (
+        ("devices", ("device_id", "sn")),
+        ("collectors", ("collector_id", "sn")),
+    ):
+        unique_items: dict[str, dict[str, Any]] = {}
+        for site in sites:
+            for item in site.get("devices", {}).get(list_name, []):
+                key = next((str(item.get(field)) for field in identity_fields if item.get(field) not in (None, "")), "")
+                if key:
+                    unique_items[key] = item
+        if unique_items:
+            devices[list_name] = list(unique_items.values())
+    for field in ("device_count", "normal_count", "abnormal_count", "online_count", "offline_count"):
+        values = [site.get("devices", {}).get(field) for site in sites]
+        numbers = [value for value in values if isinstance(value, (int, float))]
+        if numbers:
+            devices[field] = sum(numbers)
+
+    events = [
+        event
+        for site in sites
+        for event in site.get("alarms", {}).get("events", [])
+        if isinstance(event, dict)
+    ]
+    alarms = {
+        "unsolved_count": sum(int(site.get("alarms", {}).get("unsolved_count") or 0) for site in sites),
+        "event_total": sum(int(site.get("alarms", {}).get("event_total") or 0) for site in sites),
+        "events": events,
+    }
+
+    return {
+        "platform": "kehua",
+        "updated_at": max(str(site.get("updated_at") or "") for site in sites),
+        "scrape_status": scrape_status,
+        "overview": overview,
+        "stations": list(stations_by_id.values()),
+        "alarms": alarms,
+        "devices": devices,
+        "charts": sites[0].get("charts", {}),
+    }
 
 
 def response_data(call: dict[str, Any]) -> Any:
@@ -1411,12 +1570,21 @@ def extract_site_metrics(calls: list[dict[str, Any]]) -> dict[str, Any]:
     return metrics
 
 
-def scrape_site(site_name: str, site: dict[str, Any], blueprint_file: Path, cookies_file: Path | None, timeout: int, delay: float) -> dict[str, Any]:
+def scrape_site(
+    site_name: str,
+    site: dict[str, Any],
+    blueprint_file: Path,
+    cookies_file: Path | None,
+    timeout: int,
+    delay: float,
+    account: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     blueprint = load_json(blueprint_file)
-    session, session_meta = prepare_session(site_name, site, cookies_file, timeout)
+    session, session_meta = prepare_session(site_name, site, cookies_file, timeout, credentials=account)
     calls = []
     for call in blueprint.get("calls", []):
-        result = replay_call(session, call, timeout)
+        prepared_call = prepare_kehua_account_call(call, account) if site_name == "kehua" and account else call
+        result = replay_call(session, prepared_call, timeout)
         calls.append(result)
         if site_name == "huawei" and call.get("name") == "station-list" and result.get("success"):
             for extra_call in huawei_energy_balance_calls(site, result):
@@ -1442,6 +1610,21 @@ def scrape_site(site_name: str, site: dict[str, Any], blueprint_file: Path, cook
     }
 
 
+def combine_account_results(site_name: str, account_results: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "site": site_name,
+        "scraped_at": max(str(item.get("scraped_at") or "") for item in account_results),
+        "blueprint": account_results[0].get("blueprint"),
+        "session": {"accounts": [item.get("session", {}) for item in account_results]},
+        "summary": {
+            field: sum(int(item.get("summary", {}).get(field) or 0) for item in account_results)
+            for field in ("total", "success_count", "failed_count", "auth_error_count")
+        },
+        "calls": [call for item in account_results for call in item.get("calls", [])],
+        "account_results": account_results,
+    }
+
+
 def parse_site_args(values: list[str]) -> dict[str, dict[str, Path | None]]:
     parsed: dict[str, dict[str, Path | None]] = {}
     for value in values:
@@ -1462,14 +1645,31 @@ def run_once(args: argparse.Namespace) -> dict[str, Any]:
     for site_name, paths in requested_sites.items():
         if site_name not in sites_config:
             raise SystemExit(f"Unknown site {site_name}. Available: {', '.join(sites_config)}")
-        result = scrape_site(
-            site_name,
-            sites_config[site_name],
-            Path(paths["blueprint"]),
-            Path(paths["cookies"]) if paths["cookies"] else None,
-            args.timeout,
-            args.delay,
-        )
+        cookies_file = Path(paths["cookies"]) if paths["cookies"] else None
+        accounts = load_kehua_accounts_from_env() if site_name == "kehua" else []
+        if accounts:
+            account_results = [
+                scrape_site(
+                    site_name,
+                    sites_config[site_name],
+                    Path(paths["blueprint"]),
+                    cookies_file if account.get("use_shared_cookies") else None,
+                    args.timeout,
+                    args.delay,
+                    account=account,
+                )
+                for account in accounts
+            ]
+            result = combine_account_results(site_name, account_results)
+        else:
+            result = scrape_site(
+                site_name,
+                sites_config[site_name],
+                Path(paths["blueprint"]),
+                cookies_file,
+                args.timeout,
+                args.delay,
+            )
         results.append(result)
 
         site_latest = out_dir / "latest" / site_name

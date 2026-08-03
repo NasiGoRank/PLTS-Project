@@ -16,6 +16,7 @@ dist/
 *Cookies.json
 Cookies.json
 *.har
+creds.txt
 *_playwright_profile/
 monitoring_playwright_profile/
 monitoring_discovery_profile/
