@@ -6,6 +6,21 @@ from supabase_store import SupabaseStore
 
 
 class SupabaseStoreEnvironmentTests(unittest.TestCase):
+    def test_reads_optional_daily_rollup_table_name(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SUPABASE_URL": "https://example.supabase.co",
+                "SUPABASE_SECRET_KEY": "sb_secret_server_key",
+                "SUPABASE_DAILY_TABLE": "custom_site_daily",
+            },
+            clear=True,
+        ), patch("supabase_store.create_client"):
+            store = SupabaseStore.from_env()
+
+        self.assertTrue(store.configured)
+        self.assertEqual(store.config.daily_table, "custom_site_daily")
+
     def test_rejects_publishable_key_used_as_server_secret(self):
         with patch.dict(
             os.environ,

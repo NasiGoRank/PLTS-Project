@@ -120,6 +120,13 @@ GET /api/history?limit=24
 GET /api/history?limit=24&include_payload=true
 ```
 
+Each successful refresh also upserts one row per station and local calendar day
+into `monitoring_site_daily`. Apply
+`supabase/migrations/20260803000000_site_daily_rollups.sql` before deploying this
+version. These durable facts are the source for comparable long-term site energy
+and revenue charts; raw hourly snapshots can continue using their normal
+retention window.
+
 History responses are capped at 168 rows per request.
 
 For the free Render deployment, an external scheduler calls `POST /api/refresh`

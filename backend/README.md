@@ -53,6 +53,11 @@ Health check: /health
 - `GET /api/status`: latest scraper/database metadata.
 - `GET /api/current`: newest normalized dashboard payload from Supabase.
 - `GET /api/history`: historical snapshot metadata, optionally including payloads.
+
+Captured Huawei and Kehua blueprints are request templates only. Immediately
+before replay, the scraper replaces their chart dates with the current
+Asia/Jakarta day, month, or year. Huawei's matching epoch timestamp and Kehua's
+payload signature are regenerated at the same time.
 - `POST /api/refresh`: runs one authenticated scrape for an external scheduler.
 
 For the deployed free web service, set `AUTO_SCRAPE=false` and schedule a POST

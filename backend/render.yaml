@@ -28,6 +28,8 @@ services:
         value: monitoring_current
       - key: SUPABASE_HISTORY_TABLE
         value: monitoring_snapshots
+      - key: SUPABASE_DAILY_TABLE
+        value: monitoring_site_daily
       - key: HISTORY_INTERVAL_SECONDS
         value: 3600
       - key: HISTORY_RETENTION_DAYS

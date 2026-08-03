@@ -1,8 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+import { getEnergySeries, getRevenueSeries } from "./chart_data.js";
 import "./styles.css";
 
 const TABS = ["Overview", "Energy", "Revenue"];
+const OPENFREEMAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 
 function formatNumber(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
@@ -102,15 +106,15 @@ function App() {
 
   const selected = locations.find((location) => location.uid === selectedId) || locations[0];
   const fleet = useMemo(() => buildFleet(sites, locations), [sites, locations]);
-  const selectSite = (uid) => {
+  const selectSite = useCallback((uid) => {
     setSelectedId(uid);
     setSitesOpen(false);
     setMobileMenuOpen(false);
-  };
-  const selectTab = (tab) => {
+  }, []);
+  const selectTab = useCallback((tab) => {
     setActiveTab(tab);
     setMobileMenuOpen(false);
-  };
+  }, []);
 
   if (error && !data) return <Shell><StateCard title="Unable to load data" message={error} /></Shell>;
   if (!data) return <Shell><StateCard title="Loading monitor" message="Reading latest normalized PLTS snapshot..." /></Shell>;
@@ -130,7 +134,14 @@ function App() {
       <MobileNavPanel open={mobileMenuOpen} activeTab={activeTab} onClose={() => setMobileMenuOpen(false)} onSelectTab={selectTab} />
       <main className="workspace">
         <HeroPanel fleet={fleet} selected={selected} />
-        {activeTab === "Overview" && <OverviewTab fleet={fleet} selected={selected} />}
+        {activeTab === "Overview" && (
+          <OverviewTab
+            fleet={fleet}
+            selected={selected}
+            locations={locations}
+            onSelect={selectSite}
+          />
+        )}
         {activeTab === "Energy" && <EnergyTab location={selected} fleet={fleet} />}
         {activeTab === "Revenue" && <RevenueTab location={selected} fleet={fleet} />}
       </main>
@@ -317,6 +328,7 @@ function HeroPanel({ fleet, selected }) {
           <strong>{selected?.source || "-"}</strong>
         </div>
         <h2>{selected?.name || "No station selected"}</h2>
+        <SelectedSiteMap key={selected?.uid || "empty"} location={selected} />
         <div className="terminal-stats">
           <TerminalStat label="Power" value={formatNumber(selected?.current_power_kw)} unit="kW" />
           <TerminalStat label="Month" value={formatNumber(selected?.monthly_energy_kwh, 0)} unit="kWh" />
@@ -335,7 +347,65 @@ function HeroPanel({ fleet, selected }) {
   );
 }
 
-function OverviewTab({ fleet, selected }) {
+function SelectedSiteMap({ location }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const latitude = Number(location?.latitude);
+  const longitude = Number(location?.longitude);
+  const hasCoordinates = Number.isFinite(latitude) && Number.isFinite(longitude);
+
+  useEffect(() => {
+    if (!containerRef.current || !hasCoordinates) return undefined;
+
+    const map = new maplibregl.Map({
+      container: containerRef.current,
+      style: OPENFREEMAP_STYLE,
+      center: [longitude, latitude],
+      zoom: 16,
+      attributionControl: true,
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+
+    const markerButton = document.createElement("button");
+    markerButton.type = "button";
+    markerButton.className = `station-map-marker selected ${location.status === "normal" ? "online" : "offline"}`;
+    markerButton.setAttribute("aria-label", `${location.name} exact location`);
+    markerButton.title = location.name;
+
+    const popup = new maplibregl.Popup({ offset: 18, closeButton: false })
+      .setDOMContent(stationPopup(location));
+    new maplibregl.Marker({ element: markerButton, anchor: "center" })
+      .setLngLat([longitude, latitude])
+      .setPopup(popup)
+      .addTo(map);
+    mapRef.current = map;
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+    };
+  }, [hasCoordinates, latitude, location, longitude]);
+
+  if (!hasCoordinates) {
+    return <div className="selected-map-empty">Coordinates unavailable for this station.</div>;
+  }
+
+  return (
+    <div className="selected-map-wrap">
+      <div ref={containerRef} className="selected-site-map" aria-label={`Map showing ${location.name}`} />
+      <a
+        className="selected-map-link"
+        href={`https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=18/${latitude}/${longitude}`}
+        target="_blank"
+        rel="noreferrer"
+      >
+        {latitude.toFixed(6)}, {longitude.toFixed(6)} ↗
+      </a>
+    </div>
+  );
+}
+
+function OverviewTab({ fleet, selected, locations, onSelect }) {
   return (
     <Panel title="Overview" subtitle="Fleet performance snapshot">
       <div className="metric-grid four">
@@ -344,23 +414,28 @@ function OverviewTab({ fleet, selected }) {
         <MetricCard label="Yearly energy" value={formatNumber(fleet.yearly, 0)} unit="kWh" />
         <MetricCard label="Total revenue" value={money(fleet.totalIncome)} unit="IDR" accent />
       </div>
-      <ChartCard large title="Fleet energy visualization" caption="Daily, monthly, yearly, and lifetime generation plotted on a normalized scale." points={[
-        ["Daily", fleet.daily],
-        ["Monthly", fleet.monthly],
-        ["Yearly", fleet.yearly],
-        ["Total", fleet.total],
-      ]} />
+      <TimeSeriesCard series={{
+        available: locations.some((item) => Number.isFinite(Number(item.daily_energy_kwh))),
+        labels: locations.map((item) => item.name),
+        values: locations.map((item) => item.daily_energy_kwh),
+        unit: "kWh",
+        kind: "bar",
+        title: "Today's energy by site",
+        caption: "A like-for-like comparison of energy generated today",
+        reason: "Daily site totals are unavailable.",
+      }} />
       <div className="content-split">
         <InfoCard title="Selected location">
           <LocationFacts location={selected} />
         </InfoCard>
         <InfoCard title="Fleet register">
-          <div className="facts-grid">
+          <div className="fleet-map-summary">
             <DataLine label="Total sites" value={fleet.stations} />
             <DataLine label="Platforms" value={fleet.platforms} />
             <DataLine label="Offline" value={fleet.offline} />
             <DataLine label="Current power" value={`${formatNumber(fleet.current)} kW`} />
           </div>
+          <FleetMap locations={locations} selectedId={selected?.uid} onSelect={onSelect} />
         </InfoCard>
       </div>
     </Panel>
@@ -390,35 +465,166 @@ function SitesTab({ locations, selectedId, onSelect }) {
   );
 }
 
-function EnergyTab({ location, fleet }) {
-  const energy = energyMetrics(location);
+function validCoordinate(value) {
+  return Number.isFinite(Number(value));
+}
+
+function stationPopup(location) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "station-popup";
+
+  const label = document.createElement("span");
+  label.textContent = `${location.source} · ${location.status || "unknown"}`;
+
+  const title = document.createElement("strong");
+  title.textContent = location.name || "PLTS station";
+
+  const detail = document.createElement("p");
+  detail.textContent = `${formatNumber(location.capacity_kwp)} kWp · ${formatNumber(location.current_power_kw)} kW`;
+
+  const address = document.createElement("p");
+  address.textContent = location.address || "Address unavailable";
+
+  wrapper.append(label, title, detail, address);
+  return wrapper;
+}
+
+function FleetMap({ locations, selectedId, onSelect }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const markersRef = useRef(new Map());
+  const fittedRef = useRef(false);
+  const [mapError, setMapError] = useState(null);
+
+  const mappedLocations = useMemo(() => locations.filter((location) => (
+    validCoordinate(location.latitude) && validCoordinate(location.longitude)
+  )), [locations]);
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return undefined;
+
+    const map = new maplibregl.Map({
+      container: containerRef.current,
+      style: OPENFREEMAP_STYLE,
+      center: [106.91, -6.13],
+      zoom: 11,
+      attributionControl: true,
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    map.on("load", () => setMapError(null));
+    map.on("error", (event) => {
+      if (event?.error) setMapError("The map background could not be loaded. Station coordinates remain available from the monitoring data.");
+    });
+    mapRef.current = map;
+
+    return () => {
+      markersRef.current.clear();
+      map.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    markersRef.current.forEach((marker) => marker.remove());
+    markersRef.current.clear();
+
+    const bounds = new maplibregl.LngLatBounds();
+    mappedLocations.forEach((location) => {
+      const longitude = Number(location.longitude);
+      const latitude = Number(location.latitude);
+      const markerButton = document.createElement("button");
+      markerButton.type = "button";
+      markerButton.className = `station-map-marker ${location.status === "normal" ? "online" : "offline"}`;
+      markerButton.setAttribute("aria-label", `Select ${location.name} on map`);
+      markerButton.title = location.name;
+      markerButton.addEventListener("click", () => onSelect(location.uid));
+
+      const popup = new maplibregl.Popup({ offset: 18, closeButton: false })
+        .setDOMContent(stationPopup(location));
+      const marker = new maplibregl.Marker({ element: markerButton, anchor: "center" })
+        .setLngLat([longitude, latitude])
+        .setPopup(popup)
+        .addTo(map);
+
+      markersRef.current.set(location.uid, marker);
+      bounds.extend([longitude, latitude]);
+    });
+
+    if (!fittedRef.current && !bounds.isEmpty()) {
+      map.fitBounds(bounds, { padding: 72, maxZoom: 14, duration: 0 });
+      fittedRef.current = true;
+    }
+  }, [mappedLocations, onSelect]);
+
+  useEffect(() => {
+    markersRef.current.forEach((marker, uid) => {
+      marker.getElement().classList.toggle("selected", uid === selectedId);
+    });
+  }, [mappedLocations, selectedId]);
+
+  if (!mappedLocations.length) {
+    return <EmptyState message="No valid station coordinates are available." />;
+  }
+
   return (
-    <Panel title="Energy" subtitle="kWh and MWh by selected location">
+    <>
+      <section className="map-stage fleet-map-stage surface-inset" aria-label="Interactive map of all PLTS stations">
+        <div ref={containerRef} className="station-map" />
+        {mapError && <div className="map-error" role="status">{mapError}</div>}
+        <div className="map-key" aria-hidden="true">
+          <span><i className="online" /> Online</span>
+          <span><i className="offline" /> Offline</span>
+        </div>
+      </section>
+      {mappedLocations.length < locations.length && (
+        <p className="map-note">{locations.length - mappedLocations.length} station(s) were omitted because their coordinates are missing.</p>
+      )}
+    </>
+  );
+}
+
+function EnergyTab({ location, fleet }) {
+  const [period, setPeriod] = useState("today");
+  const energy = energyMetrics(location);
+  const series = getEnergySeries(location, period);
+  return (
+    <Panel title="Energy" subtitle="Production history for the selected location">
       <div className="metric-grid four">
-        <MetricCard label="Daily" value={formatNumber(energy.daily)} unit="kWh" sub={`${formatNumber(toMwh(energy.daily), 3)} MWh`} />
-        <MetricCard label="Monthly" value={formatNumber(energy.monthly)} unit="kWh" sub={`${formatNumber(toMwh(energy.monthly), 3)} MWh`} />
-        <MetricCard label="Yearly" value={formatNumber(energy.yearly)} unit="kWh" sub={`${formatNumber(toMwh(energy.yearly), 3)} MWh`} />
-        <MetricCard label="Total" value={formatNumber(energy.total)} unit="kWh" sub={`${formatNumber(toMwh(energy.total), 3)} MWh`} accent />
+        <MetricCard label="Today" value={formatNumber(energy.daily)} unit="kWh" sub={`${formatNumber(toMwh(energy.daily), 3)} MWh`} />
+        <MetricCard label="This month" value={formatNumber(energy.monthly)} unit="kWh" sub={`${formatNumber(toMwh(energy.monthly), 3)} MWh`} />
+        <MetricCard label="This year" value={formatNumber(energy.yearly)} unit="kWh" sub={`${formatNumber(toMwh(energy.yearly), 3)} MWh`} />
+        <MetricCard label="Lifetime" value={formatNumber(energy.total)} unit="kWh" sub={`${formatNumber(toMwh(energy.total), 3)} MWh`} accent />
       </div>
-      <ChartCard large title="Selected site energy curve" caption={location?.name || "Selected PLTS location"} points={[
-        ["Daily", energy.daily],
-        ["Monthly", energy.monthly],
-        ["Yearly", energy.yearly],
-        ["Total", energy.total],
-      ]} />
+      <TimeSeriesCard
+        series={series}
+        locationName={location?.name}
+        action={(
+          <PeriodControl
+            label="Energy chart period"
+            options={[["today", "Today"], ["month", "Month"], ["year", "Year"]]}
+            value={period}
+            onChange={setPeriod}
+          />
+        )}
+      />
       <div className="content-split">
-        <ChartCard title="Fleet energy reference" points={[
-          ["Daily", fleet.daily],
-          ["Monthly", fleet.monthly],
-          ["Yearly", fleet.yearly],
-          ["Total", fleet.total],
-        ]} />
-        <InfoCard title="Unit conversion">
+        <InfoCard title="Selected site totals">
           <div className="facts-grid">
             <DataLine label="Daily MWh" value={`${formatNumber(toMwh(energy.daily), 3)} MWh`} />
             <DataLine label="Monthly MWh" value={`${formatNumber(toMwh(energy.monthly), 3)} MWh`} />
             <DataLine label="Yearly MWh" value={`${formatNumber(toMwh(energy.yearly), 3)} MWh`} />
             <DataLine label="Total MWh" value={`${formatNumber(toMwh(energy.total), 3)} MWh`} />
+          </div>
+        </InfoCard>
+        <InfoCard title="Fleet reference">
+          <div className="facts-grid">
+            <DataLine label="Fleet today" value={`${formatNumber(fleet.daily)} kWh`} />
+            <DataLine label="Fleet month" value={`${formatNumber(fleet.monthly)} kWh`} />
+            <DataLine label="Fleet year" value={`${formatNumber(fleet.yearly)} kWh`} />
+            <DataLine label="Fleet lifetime" value={`${formatNumber(fleet.total)} kWh`} />
           </div>
         </InfoCard>
       </div>
@@ -427,37 +633,160 @@ function EnergyTab({ location, fleet }) {
 }
 
 function RevenueTab({ location, fleet }) {
+  const [period, setPeriod] = useState("year");
   const revenue = revenueMetrics(location);
+  const series = getRevenueSeries(location, period);
+  const currency = location?.income_currency || (location?.source === "huawei" ? "IDR" : "Currency");
   return (
-    <Panel title="Revenue" subtitle="Rupiah accumulation from platform feed">
+    <Panel title="Revenue" subtitle="Vendor-reported revenue for the selected location">
       <div className="metric-grid four">
-        <MetricCard label="Daily" value={money(revenue.daily)} unit="IDR" />
-        <MetricCard label="Monthly" value={money(revenue.monthly)} unit="IDR" />
-        <MetricCard label="Yearly" value={money(revenue.yearly)} unit="IDR" />
-        <MetricCard label="Total" value={money(revenue.total)} unit="IDR" accent />
+        <MetricCard label="Today" value={formatRevenue(revenue.daily, currency)} unit={currency} />
+        <MetricCard label="This month" value={formatRevenue(revenue.monthly, currency)} unit={currency} />
+        <MetricCard label="This year" value={formatRevenue(revenue.yearly, currency)} unit={currency} />
+        <MetricCard label="Lifetime" value={formatRevenue(revenue.total, currency)} unit={currency} accent />
       </div>
-      {revenue.hasAny ? <ChartCard large moneyMode title="Selected site revenue visualization" caption={location?.name || "Selected PLTS location"} points={[
-        ["Daily", revenue.daily],
-        ["Monthly", revenue.monthly],
-        ["Yearly", revenue.yearly],
-        ["Total", revenue.total],
-      ]} /> : <InfoCard title="Selected revenue"><EmptyState message="Data rupiah belum tersedia untuk lokasi ini." /></InfoCard>}
+      <TimeSeriesCard
+        series={series}
+        locationName={location?.name}
+        moneyMode
+        action={(
+          <PeriodControl
+            label="Revenue chart period"
+            options={[["month", "Month"], ["year", "Year"], ["lifetime", "Lifetime"]]}
+            value={period}
+            onChange={setPeriod}
+          />
+        )}
+      />
       <div className="content-split">
-        <ChartCard moneyMode title="Fleet revenue" points={[
-          ["Monthly", fleet.monthlyIncome],
-          ["Yearly", fleet.yearlyIncome],
-          ["Total", fleet.totalIncome],
-        ]} />
-        <InfoCard title="Revenue register">
+        <InfoCard title="Selected site revenue">
+          <div className="facts-grid">
+            <DataLine label="Currency" value={currency} />
+            <DataLine label="Today" value={formatRevenue(revenue.daily, currency)} />
+            <DataLine label="This year" value={formatRevenue(revenue.yearly, currency)} />
+            <DataLine label="Lifetime" value={formatRevenue(revenue.total, currency)} />
+          </div>
+        </InfoCard>
+        <InfoCard title="Fleet revenue reference">
           <div className="facts-grid">
             <DataLine label="Fleet month" value={money(fleet.monthlyIncome)} />
             <DataLine label="Fleet year" value={money(fleet.yearlyIncome)} />
             <DataLine label="Fleet total" value={money(fleet.totalIncome)} />
-            <DataLine label="Selected total" value={money(revenue.total)} />
+            <DataLine label="Selected platform" value={location?.source || "-"} />
           </div>
         </InfoCard>
       </div>
     </Panel>
+  );
+}
+
+function formatRevenue(value, currency) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "Tidak tersedia";
+  if (currency === "IDR") return money(value);
+  return `${currency} ${formatNumber(value, 0)}`;
+}
+
+function PeriodControl({ label, options, value, onChange }) {
+  return (
+    <div className="period-control" role="group" aria-label={label}>
+      {options.map(([key, text]) => (
+        <button
+          key={key}
+          type="button"
+          className={value === key ? "active" : ""}
+          aria-pressed={value === key}
+          onClick={() => onChange(key)}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TimeSeriesCard({ series, locationName, moneyMode = false, action = null }) {
+  return (
+    <section className="chart-card chart-card-large surface-inset time-series-card">
+      <div className="chart-card-head">
+        <div>
+          <h3>{series.title}</h3>
+          <p>{[locationName, series.caption].filter(Boolean).join(" · ")}</p>
+        </div>
+        <div className="chart-card-actions">
+          {action}
+          <span className="chart-unit">{series.unit}</span>
+        </div>
+      </div>
+      {series.available
+        ? <TimeSeriesChart series={series} moneyMode={moneyMode} />
+        : <SeriesEmptyState reason={series.reason} />}
+    </section>
+  );
+}
+
+function SeriesEmptyState({ reason }) {
+  return (
+    <div className="series-empty" role="status">
+      <strong>Historical series unavailable</strong>
+      <p>{reason}</p>
+      <span>Summary totals above remain valid.</span>
+    </div>
+  );
+}
+
+function TimeSeriesChart({ series, moneyMode }) {
+  const gradientId = React.useId();
+  const values = series.values.map((value) => Number.isFinite(Number(value)) ? Number(value) : null);
+  const valid = values.filter((value) => value !== null);
+  const max = Math.max(...valid, 1);
+  const axisValue = (value) => moneyMode ? compactMoney(value) : formatNumber(value, value < 10 ? 1 : 0);
+  const yTicks = Array.from({ length: 5 }, (_, index) => ({
+    value: max - (max * index) / 4,
+    top: 12 + index * 18,
+  }));
+  const coords = values.map((value, index) => ({
+    value,
+    label: series.labels[index],
+    x: 3 + (index / Math.max(values.length - 1, 1)) * 94,
+    y: value === null ? null : 84 - (value / max) * 72,
+  }));
+  const tickIndexes = [...new Set(Array.from({ length: Math.min(6, coords.length) }, (_, index) => (
+    Math.round(index * (coords.length - 1) / Math.max(Math.min(6, coords.length) - 1, 1))
+  )))];
+  const barWidth = Math.min(7, 72 / Math.max(coords.length, 1));
+  const latest = [...coords].reverse().find((point) => point.value !== null);
+
+  return (
+    <div>
+      <div className="time-series-wrap">
+        <svg viewBox="0 0 100 100" className="time-series-chart" preserveAspectRatio="none" role="img" aria-label={`${series.title}, ${series.unit}`}>
+          <defs>
+            <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+              <stop stopColor="#8b94ff" />
+              <stop offset="1" stopColor="#5E6AD2" />
+            </linearGradient>
+          </defs>
+          {yTicks.map((tick) => <line key={tick.top} x1="3" x2="98" y1={tick.top} y2={tick.top} className="chart-grid-line" />)}
+          <line x1="3" x2="98" y1="84" y2="84" className="chart-axis-line" />
+          {coords.map((point, index) => point.y !== null && (
+            <rect key={`${point.label}-${index}`} x={point.x - barWidth / 2} y={point.y} width={barWidth} height={84 - point.y} rx="1" fill={`url(#${gradientId})`}>
+              <title>{point.label}: {axisValue(point.value)} {series.unit}</title>
+            </rect>
+          ))}
+        </svg>
+        <div className="time-axis-y" aria-hidden="true">
+          {yTicks.map((tick) => <span key={tick.top} style={{ top: `${tick.top}%` }}>{axisValue(tick.value)}</span>)}
+        </div>
+        <div className="time-axis-x" aria-hidden="true">
+          {tickIndexes.map((index) => <span key={index} style={{ left: `${coords[index].x}%` }}>{coords[index].label}</span>)}
+        </div>
+      </div>
+      <div className="series-summary">
+        <DataLine label="Records" value={`${valid.length} / ${values.length}`} />
+        <DataLine label="Highest" value={`${axisValue(max)} ${series.unit}`} />
+        <DataLine label="Latest" value={latest ? `${axisValue(latest.value)} ${series.unit}` : "-"} />
+      </div>
+    </div>
   );
 }
 
