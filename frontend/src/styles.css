@@ -533,8 +533,7 @@ button {
 }
 
 .hero-copy,
-.hero-terminal,
-.fleet-strip {
+.hero-terminal {
   padding: 24px;
 }
 
@@ -697,7 +696,7 @@ button {
 }
 
 .fleet-strip {
-  grid-column: 1 / -1;
+  margin-top: 24px;
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
@@ -1610,13 +1609,11 @@ button {
 
   .hero-copy,
   .hero-terminal,
-  .fleet-strip,
   .panel,
   .top-nav {
     padding: 16px;
   }
 
-  .fleet-strip,
   .terminal-stats,
   .metric-grid.four,
   .metric-grid.three,
@@ -1627,6 +1624,15 @@ button {
   .chart-legend,
   .site-table div {
     grid-template-columns: 1fr;
+  }
+
+  .fleet-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .fleet-strip .mini-metric:last-child {
+    grid-column: 1 / -1;
   }
 
   .fleet-map-summary {
