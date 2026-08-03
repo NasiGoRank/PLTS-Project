@@ -321,6 +321,13 @@ function HeroPanel({ fleet, selected }) {
         <p className="hero-text">
           Dashboard ringkas untuk memantau kWh, MWh, akumulasi rupiah, dan status lokasi dari Huawei FusionSolar dan Kehua.
         </p>
+        <div className="fleet-strip" aria-label="Fleet summary">
+          <MiniMetric label="Sites" value={fleet.stations} />
+          <MiniMetric label="Capacity" value={formatNumber(fleet.capacity)} unit="kWp" />
+          <MiniMetric label="Now" value={formatNumber(fleet.current)} unit="kW" />
+          <MiniMetric label="Month" value={formatNumber(fleet.monthly, 0)} unit="kWh" />
+          <MiniMetric label="Revenue" value={compactMoney(fleet.totalIncome)} unit="IDR" accent />
+        </div>
       </section>
       <section className="hero-terminal surface">
         <div className="terminal-head">
@@ -336,13 +343,6 @@ function HeroPanel({ fleet, selected }) {
           <TerminalStat label="Revenue" value={compactMoney(selected?.cumulative_income)} unit="IDR" />
         </div>
       </section>
-      <div className="fleet-strip surface">
-        <MiniMetric label="Sites" value={fleet.stations} />
-        <MiniMetric label="Capacity" value={formatNumber(fleet.capacity)} unit="kWp" />
-        <MiniMetric label="Now" value={formatNumber(fleet.current)} unit="kW" />
-        <MiniMetric label="Month" value={formatNumber(fleet.monthly, 0)} unit="kWh" />
-        <MiniMetric label="Revenue" value={compactMoney(fleet.totalIncome)} unit="IDR" accent />
-      </div>
     </header>
   );
 }
