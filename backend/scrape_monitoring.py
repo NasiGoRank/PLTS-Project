@@ -330,6 +330,53 @@ def build_request_headers(session: requests.Session, call: dict[str, Any]) -> di
     return headers
 
 
+def prepare_replay_call(
+    call: dict[str, Any],
+    current_time: datetime | None = None,
+    *,
+    sign_timestamp_ms: int | None = None,
+) -> dict[str, Any]:
+    """Refresh captured period fields and request signatures before replay."""
+    prepared = dict(call)
+    prepared["headers"] = dict(call.get("headers", {}) or {})
+    now = current_time or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    jakarta_now = now.astimezone(timezone(timedelta(hours=7)))
+
+    if call.get("site") == "huawei" and call.get("name") == "home-station-kpi-chart":
+        payload = try_parse_json(call.get("payload_raw") or "")
+        if isinstance(payload, dict):
+            stat_dim = str(payload.get("statDim") or "")
+            if stat_dim == "4":
+                target = jakarta_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            elif stat_dim in {"5", "6"}:
+                target = jakarta_now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            else:
+                target = None
+            if target is not None:
+                payload["statTimeStr"] = target.strftime("%Y-%m-%d")
+                payload["statTime"] = int(target.timestamp() * 1000)
+                prepared["payload_raw"] = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+
+    if call.get("site") == "kehua":
+        payload = parse_form_payload(str(prepared.get("payload_raw") or ""))
+        if "targetTime" in payload:
+            dimension = str(payload.get("dimension") or "")
+            if dimension == "2":
+                payload["targetTime"] = jakarta_now.strftime("%Y-%m")
+            elif dimension == "3":
+                payload["targetTime"] = jakarta_now.strftime("%Y")
+            elif dimension == "4":
+                payload["targetTime"] = ""
+            else:
+                payload["targetTime"] = jakarta_now.strftime("%Y-%m-%d")
+        prepared["payload_raw"] = urlencode(payload)
+        prepared["headers"]["sign"] = kehua_request_sign(payload, sign_timestamp_ms)
+
+    return prepared
+
+
 def summarize_response(response_body: Any) -> dict[str, Any]:
     app_code = None
     app_message = None
@@ -354,6 +401,7 @@ def summarize_response(response_body: Any) -> dict[str, Any]:
 
 
 def replay_call(session: requests.Session, call: dict[str, Any], timeout: int) -> dict[str, Any]:
+    call = prepare_replay_call(call)
     method = str(call.get("method", "GET")).upper()
     payload_raw = call.get("payload_raw") or ""
     request_kwargs: dict[str, Any] = {
@@ -411,46 +459,59 @@ def replay_call(session: requests.Session, call: dict[str, Any], timeout: int) -
         }
 
 
-def huawei_today_energy_balance_calls(site: dict[str, Any], station_list_call: dict[str, Any]) -> list[dict[str, Any]]:
+def huawei_energy_balance_calls(
+    site: dict[str, Any],
+    station_list_call: dict[str, Any],
+    current_time: datetime | None = None,
+) -> list[dict[str, Any]]:
     data = response_data(station_list_call)
     items = data.get("list") if isinstance(data, dict) else []
     if not isinstance(items, list):
         return []
 
     jakarta = timezone(timedelta(hours=7))
-    today = datetime.now(jakarta).replace(hour=0, minute=0, second=0, microsecond=0)
-    query = {
-        "timeDim": "2",
-        "timeZone": "7.0",
-        "timeZoneStr": "Asia/Jakarta",
-        "queryTime": str(int(today.timestamp() * 1000)),
-        "dateStr": today.strftime("%Y-%m-%d 00:00:00"),
-        "_": str(int(time.time() * 1000)),
-    }
+    now = current_time or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    today = now.astimezone(jakarta).replace(hour=0, minute=0, second=0, microsecond=0)
+    periods = (
+        ("daily", "2", today),
+        ("monthly", "4", today.replace(day=1)),
+        ("yearly", "5", today.replace(month=1, day=1)),
+    )
 
     calls = []
     for item in items:
         if not isinstance(item, dict) or not item.get("dn"):
             continue
         station_dn = str(item["dn"])
-        station_query = {"stationDn": station_dn, **query}
-        calls.append({
-            "id": f"daily_energy_balance_{station_dn.replace('=', '_')}",
-            "site": "huawei",
-            "name": "energy-balance-daily",
-            "method": "GET",
-            "url": f"{site['base_url']}/rest/pvms/web/station/v3/overview/energy-balance?{urlencode(station_query)}",
-            "headers": {
-                "Accept": "application/json, text/javascript, */*; q=0.01",
-                "Accept-Language": "en-US,en;q=0.8",
-                "Cache-Control": "no-cache",
-                "Pragma": "no-cache",
-                "Referer": site.get("dashboard_url") or site["base_url"],
-                "X-Requested-With": "XMLHttpRequest",
-                "x-timezone-offset": "420",
-            },
-            "payload_raw": "",
-        })
+        for period_name, time_dim, target in periods:
+            station_query = {
+                "stationDn": station_dn,
+                "timeDim": time_dim,
+                "timeZone": "7.0",
+                "timeZoneStr": "Asia/Jakarta",
+                "queryTime": str(int(target.timestamp() * 1000)),
+                "dateStr": target.strftime("%Y-%m-%d 00:00:00"),
+                "_": str(int(time.time() * 1000)),
+            }
+            calls.append({
+                "id": f"{period_name}_energy_balance_{station_dn.replace('=', '_')}",
+                "site": "huawei",
+                "name": f"energy-balance-{period_name}",
+                "method": "GET",
+                "url": f"{site['base_url']}/rest/pvms/web/station/v3/overview/energy-balance?{urlencode(station_query)}",
+                "headers": {
+                    "Accept": "application/json, text/javascript, */*; q=0.01",
+                    "Accept-Language": "en-US,en;q=0.8",
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
+                    "Referer": site.get("dashboard_url") or site["base_url"],
+                    "X-Requested-With": "XMLHttpRequest",
+                    "x-timezone-offset": "420",
+                },
+                "payload_raw": "",
+            })
     return calls
 
 
@@ -616,8 +677,8 @@ def huawei_energy_balance_by_station(grouped: dict[str, list[dict[str, Any]]]) -
         data = response_data(call)
         if not station_dn or not isinstance(data, dict):
             continue
-        by_station[str(station_dn)] = {
-            "daily_power_5min": compact_non_null({
+        station = by_station.setdefault(str(station_dn), {"energy_charts": {}})
+        station["daily_power_5min"] = compact_non_null({
                 "unit": "kW",
                 "time_dim": "day_5min",
                 "date": (query.get("dateStr") or [None])[0],
@@ -630,7 +691,26 @@ def huawei_energy_balance_by_station(grouped: dict[str, list[dict[str, Any]]]) -
                 "charge_power_kw": numeric_series(data.get("chargePower")),
                 "discharge_power_kw": numeric_series(data.get("dischargePower")),
             })
-        }
+
+    for call_name, chart_key in (("energy-balance-monthly", "daily"), ("energy-balance-yearly", "monthly")):
+        for call in grouped.get(call_name) or []:
+            parsed = urlparse(call.get("url") or "")
+            query = parse_qs(parsed.query)
+            station_dn = (query.get("stationDn") or [None])[0]
+            data = response_data(call)
+            if not station_dn or not isinstance(data, dict):
+                continue
+            labels = data.get("xAxis")
+            values = numeric_series(data.get("productPower"))
+            if not isinstance(labels, list) or not values or len(labels) != len(values):
+                continue
+            if not any(value is not None for value in values):
+                continue
+            station = by_station.setdefault(str(station_dn), {"energy_charts": {}})
+            station.setdefault("energy_charts", {})[chart_key] = {
+                "labels": [str(label) for label in labels],
+                "values": values,
+            }
     return by_station
 
 
@@ -1339,7 +1419,7 @@ def scrape_site(site_name: str, site: dict[str, Any], blueprint_file: Path, cook
         result = replay_call(session, call, timeout)
         calls.append(result)
         if site_name == "huawei" and call.get("name") == "station-list" and result.get("success"):
-            for extra_call in huawei_today_energy_balance_calls(site, result):
+            for extra_call in huawei_energy_balance_calls(site, result):
                 extra_result = replay_call(session, extra_call, timeout)
                 calls.append(extra_result)
                 if delay:

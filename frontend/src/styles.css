@@ -584,11 +584,62 @@ button {
 }
 
 .hero-terminal h2 {
-  margin: 22px 0;
+  margin: 18px 0;
   font-size: clamp(1.7rem, 3vw, 2.7rem);
   font-weight: 650;
   letter-spacing: -.04em;
   line-height: 1;
+}
+
+.selected-map-wrap {
+  position: relative;
+  min-height: 250px;
+  margin-bottom: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 14px;
+  background: rgba(0,0,0,.22);
+}
+
+.selected-site-map {
+  position: absolute;
+  inset: 0;
+}
+
+.selected-map-link {
+  position: absolute;
+  right: 10px;
+  bottom: 28px;
+  z-index: 2;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: var(--foreground);
+  background: rgba(10,10,12,.88);
+  box-shadow: var(--shadow-card);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: .62rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.selected-map-link:hover,
+.selected-map-link:focus-visible {
+  color: #fff;
+  background: rgba(94,106,210,.88);
+}
+
+.selected-map-empty {
+  display: flex;
+  min-height: 160px;
+  margin-bottom: 14px;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(255,255,255,.12);
+  border-radius: 14px;
+  color: var(--muted);
+  font-size: .78rem;
+  text-align: center;
 }
 
 .terminal-stats,
@@ -799,6 +850,252 @@ button {
   margin-top: 14px;
 }
 
+.map-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, .34fr);
+  gap: 14px;
+}
+
+.map-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 560px;
+  overflow: hidden;
+}
+
+.station-map {
+  position: absolute;
+  inset: 0;
+}
+
+.station-map .maplibregl-canvas,
+.selected-site-map .maplibregl-canvas {
+  outline: none;
+}
+
+.station-map .maplibregl-ctrl-group,
+.selected-site-map .maplibregl-ctrl-group {
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(10,10,12,.9);
+  box-shadow: var(--shadow-card);
+}
+
+.station-map .maplibregl-ctrl-group button,
+.selected-site-map .maplibregl-ctrl-group button {
+  filter: invert(1);
+}
+
+.station-map .maplibregl-ctrl-attrib,
+.selected-site-map .maplibregl-ctrl-attrib {
+  color: #222;
+  background: rgba(255,255,255,.86);
+}
+
+.station-map-marker {
+  width: 22px;
+  height: 22px;
+  border: 3px solid #08080a;
+  border-radius: 999px;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 0 0 0 2px rgba(255,255,255,.88), 0 4px 18px rgba(0,0,0,.48);
+  transition: transform .2s var(--ease), box-shadow .2s var(--ease);
+}
+
+.station-map-marker.online {
+  background: #48dd8b;
+}
+
+.station-map-marker.offline {
+  background: var(--accent-bright);
+}
+
+.station-map-marker:hover,
+.station-map-marker:focus-visible,
+.station-map-marker.selected {
+  transform: scale(1.35);
+  box-shadow: 0 0 0 3px #fff, 0 0 0 7px rgba(94,106,210,.58), 0 8px 28px rgba(0,0,0,.55);
+}
+
+.station-map .maplibregl-popup-content,
+.selected-site-map .maplibregl-popup-content {
+  min-width: 220px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 14px;
+  padding: 14px;
+  color: var(--foreground);
+  background: rgba(10,10,12,.96);
+  box-shadow: var(--shadow-hover);
+}
+
+.station-map .maplibregl-popup-tip,
+.selected-site-map .maplibregl-popup-tip {
+  border-top-color: rgba(10,10,12,.96);
+}
+
+.station-popup span,
+.station-popup strong,
+.station-popup p {
+  display: block;
+}
+
+.station-popup span {
+  color: #a9b0ff;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: .64rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.station-popup strong {
+  margin-top: 7px;
+  font-size: .92rem;
+}
+
+.station-popup p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: .75rem;
+  line-height: 1.45;
+}
+
+.map-key {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 2;
+  display: flex;
+  gap: 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: var(--foreground);
+  background: rgba(10,10,12,.88);
+  box-shadow: var(--shadow-card);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: .66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.map-key span {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.map-key i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.map-key i.online { background: #48dd8b; }
+.map-key i.offline { background: var(--accent-bright); }
+
+.map-error {
+  position: absolute;
+  right: 14px;
+  bottom: 34px;
+  left: 14px;
+  z-index: 2;
+  border: 1px solid rgba(255,192,92,.28);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: #ffe0a8;
+  background: rgba(28,20,8,.92);
+  font-size: .82rem;
+}
+
+.map-station-list {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  max-height: 560px;
+  overflow-y: auto;
+}
+
+.map-station-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  padding: 13px;
+  background: rgba(255,255,255,.035);
+  transition: border-color .2s var(--ease), background .2s var(--ease), transform .2s var(--ease);
+}
+
+.map-station-card:hover,
+.map-station-card:focus-within,
+.map-station-card.active {
+  border-color: rgba(94,106,210,.38);
+  background: rgba(94,106,210,.12);
+}
+
+.map-station-card:active { transform: scale(.99); }
+
+.map-station-select {
+  display: grid;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  color: var(--foreground);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.map-station-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+}
+
+.map-station-heading strong {
+  overflow: hidden;
+  font-size: .86rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-station-card small,
+.map-station-card em,
+.map-station-card a {
+  font-size: .7rem;
+}
+
+.map-station-card small {
+  color: #a9b0ff;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+.map-station-card em {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-style: normal;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.map-station-card a {
+  width: fit-content;
+  color: #c5c9ff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.map-station-card a:hover { text-decoration: underline; }
+
+.map-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: .76rem;
+}
+
 .info-card,
 .chart-card {
   padding: 18px;
@@ -815,6 +1112,176 @@ button {
   background:
     radial-gradient(680px circle at 24% 4%, rgba(94,106,210,.18), transparent 42%),
     rgba(255,255,255,.035);
+}
+
+.period-control {
+  display: inline-flex;
+  gap: 4px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 12px;
+  background: rgba(255,255,255,.035);
+}
+
+.period-control button {
+  min-width: 92px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 9px;
+  padding: 0 14px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: .78rem;
+  font-weight: 700;
+  transition: color .2s var(--ease), background .2s var(--ease), box-shadow .2s var(--ease);
+}
+
+.period-control button:hover,
+.period-control button:focus-visible {
+  color: var(--foreground);
+  background: rgba(255,255,255,.06);
+}
+
+.period-control button.active {
+  color: #fff;
+  background: rgba(94,106,210,.24);
+  box-shadow: 0 0 0 1px rgba(94,106,210,.34), 0 8px 24px rgba(94,106,210,.14);
+}
+
+.time-series-card {
+  margin-top: 12px;
+}
+
+.time-series-wrap {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 28px;
+  column-gap: 10px;
+  row-gap: 8px;
+  height: clamp(340px, 38vw, 500px);
+  border: 1px solid rgba(255,255,255,.055);
+  border-radius: 16px;
+  padding: 14px;
+  background:
+    linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px),
+    rgba(0,0,0,.18);
+  background-size: 40px 40px;
+}
+
+.time-series-chart {
+  display: block;
+  grid-column: 2;
+  grid-row: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  filter: drop-shadow(0 14px 28px rgba(94,106,210,.14));
+}
+
+.time-axis-y,
+.time-axis-x {
+  position: relative;
+  pointer-events: none;
+  color: rgba(255,255,255,.54);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: .64rem;
+  font-weight: 700;
+}
+
+.time-axis-y {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.time-axis-x {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.time-axis-y span,
+.time-axis-x span {
+  position: absolute;
+  white-space: nowrap;
+}
+
+.time-axis-y span {
+  right: 0;
+  transform: translateY(-50%);
+}
+
+.time-axis-x span {
+  bottom: 0;
+  max-width: 116px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transform: translateX(-50%);
+}
+
+.series-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.series-summary > div {
+  border: 1px solid rgba(255,255,255,.055);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255,255,255,.035);
+}
+
+.series-summary span {
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: .64rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.series-summary strong {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: .78rem;
+}
+
+.series-empty {
+  display: flex;
+  min-height: 340px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(255,255,255,.10);
+  border-radius: 16px;
+  padding: 24px;
+  color: var(--muted);
+  background: rgba(0,0,0,.15);
+  text-align: center;
+}
+
+.series-empty strong {
+  color: var(--foreground);
+  font-size: 1rem;
+}
+
+.series-empty p {
+  max-width: 520px;
+  margin: 10px 0 6px;
+  line-height: 1.55;
+}
+
+.series-empty span {
+  color: #a9b0ff;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .chart-card-head {
@@ -836,7 +1303,15 @@ button {
   line-height: 1.5;
 }
 
-.chart-card-head > span {
+.chart-card-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.chart-unit {
   flex: 0 0 auto;
   border: 1px solid rgba(94,106,210,.34);
   border-radius: 999px;
@@ -978,6 +1453,42 @@ button {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.fleet-map-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.fleet-map-summary > div {
+  border: 1px solid rgba(255,255,255,.055);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255,255,255,.03);
+}
+
+.fleet-map-summary span {
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: .62rem;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.fleet-map-summary strong {
+  display: block;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: .76rem;
+}
+
+.fleet-map-stage {
+  min-height: 400px;
+}
+
 .facts-grid .wide {
   grid-column: 1 / -1;
 }
@@ -1081,8 +1592,14 @@ button {
 
 @media (max-width: 1120px) {
   .hero-grid,
-  .content-split {
+  .content-split,
+  .map-layout {
     grid-template-columns: 1fr;
+  }
+
+  .map-station-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-height: none;
   }
 }
 
@@ -1109,6 +1626,41 @@ button {
   .facts-grid,
   .chart-legend,
   .site-table div {
+    grid-template-columns: 1fr;
+  }
+
+  .fleet-map-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .period-control {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+  .chart-card-head {
+    flex-direction: column;
+  }
+  .chart-card-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .chart-card-actions .period-control {
+    flex: 1 1 auto;
+  }
+
+  .period-control button {
+    min-width: 0;
+    padding: 0 8px;
+  }
+
+  .time-series-wrap {
+    grid-template-columns: 46px minmax(0, 1fr);
+    height: 340px;
+    padding: 10px;
+  }
+
+  .series-summary {
     grid-template-columns: 1fr;
   }
 
@@ -1193,6 +1745,23 @@ button {
 
   .hero-terminal {
     min-height: 0;
+  }
+
+  .map-stage {
+    min-height: 420px;
+  }
+
+  .fleet-map-stage {
+    min-height: 360px;
+  }
+
+  .map-station-list {
+    grid-template-columns: 1fr;
+  }
+
+  .map-key {
+    gap: 8px;
+    padding: 7px 10px;
   }
 }
 
