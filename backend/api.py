@@ -300,6 +300,11 @@ def root() -> dict[str, Any]:
     }
 
 
+@app.head("/")
+def root_head() -> None:
+    return None
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     """Render liveness endpoint. Database or scraper failures do not terminate the process."""
