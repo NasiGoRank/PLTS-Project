@@ -7,6 +7,168 @@ import "./styles.css";
 
 const TABS = ["Overview", "Energy", "Revenue"];
 const OPENFREEMAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+const AUTH_STORAGE_KEY = "plts-monitoring.supabase-session";
+const UI_STATE_STORAGE_KEY = "plts-monitoring.ui-state";
+
+function apiBase() {
+  const configuredApiBase = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+  return configuredApiBase || (import.meta.env.DEV ? "http://localhost:8000" : "");
+}
+
+function authConfig() {
+  return {
+    url: (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, ""),
+    key: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "",
+  };
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 10_000) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err?.name === "AbortError") throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`);
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+function normalizeSession(payload) {
+  if (!payload?.access_token || !payload?.refresh_token) return null;
+  const expiresAt = payload.expires_at || Math.floor(Date.now() / 1000) + Number(payload.expires_in || 3600);
+  return {
+    access_token: payload.access_token,
+    refresh_token: payload.refresh_token,
+    expires_at: expiresAt,
+    user: payload.user || null,
+  };
+}
+
+function readStoredSession() {
+  try {
+    return normalizeSession(JSON.parse(window.localStorage.getItem(AUTH_STORAGE_KEY) || "null"));
+  } catch {
+    return null;
+  }
+}
+
+function storeSession(session) {
+  if (!session) {
+    window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+}
+
+function readUiState() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(UI_STATE_STORAGE_KEY) || "{}");
+    return {
+      activeTab: TABS.includes(stored.activeTab) ? stored.activeTab : "Overview",
+      selectedId: typeof stored.selectedId === "string" ? stored.selectedId : null,
+    };
+  } catch {
+    return { activeTab: "Overview", selectedId: null };
+  }
+}
+
+function writeUiState(updates) {
+  try {
+    window.localStorage.setItem(UI_STATE_STORAGE_KEY, JSON.stringify({
+      ...readUiState(),
+      ...updates,
+    }));
+  } catch {
+    // Ignore storage failures; the dashboard should keep working.
+  }
+}
+
+async function authRequest(path, body) {
+  const { url, key } = authConfig();
+  if (!url || !key) throw new Error("Supabase Auth is not configured");
+  const response = await fetchWithTimeout(`${url}${path}`, {
+    method: "POST",
+    headers: {
+      apikey: key,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error_description || payload.msg || payload.message || `Supabase Auth returned ${response.status}`);
+  }
+  return payload;
+}
+
+async function signInWithPassword(email, password) {
+  const payload = await authRequest("/auth/v1/token?grant_type=password", { email, password });
+  const session = normalizeSession(payload);
+  if (!session) throw new Error("Supabase Auth did not return a usable session");
+  storeSession(session);
+  return session;
+}
+
+async function refreshAuthSession(session) {
+  if (!session?.refresh_token) return null;
+  const payload = await authRequest("/auth/v1/token?grant_type=refresh_token", {
+    refresh_token: session.refresh_token,
+  });
+  const nextSession = normalizeSession(payload);
+  storeSession(nextSession);
+  return nextSession;
+}
+
+function useAuthSession() {
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const boot = async () => {
+      const stored = readStoredSession();
+      if (!stored) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      const expiresSoon = Number(stored.expires_at || 0) * 1000 < Date.now() + 60_000;
+      try {
+        const usableSession = expiresSoon ? await refreshAuthSession(stored) : stored;
+        if (!cancelled) {
+          setSession(usableSession);
+          setError(null);
+        }
+      } catch (err) {
+        storeSession(null);
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    boot();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const signIn = useCallback(async (email, password) => {
+    setError(null);
+    const nextSession = await signInWithPassword(email, password);
+    setSession(nextSession);
+    return nextSession;
+  }, []);
+
+  const signOut = useCallback(() => {
+    storeSession(null);
+    setSession(null);
+    setError(null);
+  }, []);
+
+  return { session, loading, error, signIn, signOut };
+}
 
 function formatNumber(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
@@ -31,31 +193,51 @@ function compactMoney(value) {
   return formatNumber(number, 0);
 }
 
+function userDisplayName(user) {
+  const rawName = user?.user_metadata?.name || user?.user_metadata?.full_name || user?.email || "operator";
+  return String(rawName).includes("@") ? String(rawName).split("@")[0] : String(rawName);
+}
+
 function toMwh(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number / 1000 : null;
 }
 
-function useMonitoringData() {
+function useMonitoringData(session, onUnauthorized) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
-    const configuredApiBase = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
-    const apiBase = configuredApiBase || (import.meta.env.DEV ? "http://localhost:8000" : "");
+    const base = apiBase();
     const pollInterval = Math.max(15_000, Number(import.meta.env.VITE_POLL_INTERVAL_MS || 60_000));
 
-    if (!apiBase) {
+    if (!base) {
       setError("VITE_API_URL is not configured for this deployment");
       return undefined;
     }
 
-    const endpoint = `${apiBase}/api/current`;
+    const endpoint = `${base}/api/current`;
+    const accessToken = session?.access_token;
+
+    if (!accessToken) {
+      setData(null);
+      setError(null);
+      return undefined;
+    }
 
     const load = async () => {
       try {
-        const response = await fetch(`${endpoint}?ts=${Date.now()}`, { cache: "no-store" });
+        const response = await fetchWithTimeout(`${endpoint}?ts=${Date.now()}`, {
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }, 12_000);
+        if (response.status === 401) {
+          onUnauthorized?.();
+          throw new Error("Session expired. Please sign in again.");
+        }
         if (!response.ok) throw new Error(`Monitoring API returned ${response.status}`);
         const json = await response.json();
         if (!cancelled) {
@@ -74,17 +256,46 @@ function useMonitoringData() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [session?.access_token, onUnauthorized]);
 
   return { data, error };
 }
 
 function App() {
-  const { data, error } = useMonitoringData();
-  const [activeTab, setActiveTab] = useState("Overview");
-  const [selectedId, setSelectedId] = useState(null);
+  const auth = useAuthSession();
+  const [welcomeSessionId, setWelcomeSessionId] = useState(null);
+
+  const handleSignIn = useCallback(async (email, password) => {
+    const nextSession = await auth.signIn(email, password);
+    setWelcomeSessionId(nextSession.user?.id || nextSession.user?.email || String(Date.now()));
+    return nextSession;
+  }, [auth]);
+
+  const handleSignOut = useCallback(() => {
+    setWelcomeSessionId(null);
+    auth.signOut();
+  }, [auth]);
+
+  if (auth.loading) return <Shell><LoadingScreen /></Shell>;
+  if (!auth.session) return <Shell><LoginPage onSignIn={handleSignIn} initialError={auth.error} /></Shell>;
+
+  return (
+    <Dashboard
+      session={auth.session}
+      onSignOut={handleSignOut}
+      showWelcome={Boolean(welcomeSessionId)}
+      onWelcomeClose={() => setWelcomeSessionId(null)}
+    />
+  );
+}
+
+function Dashboard({ session, onSignOut, showWelcome, onWelcomeClose }) {
+  const { data, error } = useMonitoringData(session, onSignOut);
+  const [activeTab, setActiveTab] = useState(() => readUiState().activeTab);
+  const [selectedId, setSelectedId] = useState(() => readUiState().selectedId);
   const [sitesOpen, setSitesOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [welcomeClosing, setWelcomeClosing] = useState(false);
 
   const sites = useMemo(() => {
     if (!data?.by_site) return [];
@@ -101,23 +312,42 @@ function App() {
   }, [sites]);
 
   useEffect(() => {
-    if (!selectedId && locations.length) setSelectedId(locations[0].uid);
+    if (!locations.length) return;
+    if (!selectedId || !locations.some((location) => location.uid === selectedId)) {
+      const fallbackId = locations[0].uid;
+      setSelectedId(fallbackId);
+      writeUiState({ selectedId: fallbackId });
+    }
   }, [locations, selectedId]);
 
   const selected = locations.find((location) => location.uid === selectedId) || locations[0];
   const fleet = useMemo(() => buildFleet(sites, locations), [sites, locations]);
   const selectSite = useCallback((uid) => {
     setSelectedId(uid);
+    writeUiState({ selectedId: uid });
     setSitesOpen(false);
     setMobileMenuOpen(false);
   }, []);
   const selectTab = useCallback((tab) => {
     setActiveTab(tab);
+    writeUiState({ activeTab: tab });
     setMobileMenuOpen(false);
   }, []);
 
+  const closeWelcome = useCallback(() => {
+    setWelcomeClosing(true);
+    window.setTimeout(onWelcomeClose, 280);
+  }, [onWelcomeClose]);
+
+  useEffect(() => {
+    if (!showWelcome) return undefined;
+    setWelcomeClosing(false);
+    const timer = window.setTimeout(closeWelcome, 4200);
+    return () => window.clearTimeout(timer);
+  }, [showWelcome, closeWelcome]);
+
   if (error && !data) return <Shell><StateCard title="Unable to load data" message={error} /></Shell>;
-  if (!data) return <Shell><StateCard title="Loading monitor" message="Reading latest normalized PLTS snapshot..." /></Shell>;
+  if (!data) return <Shell><LoadingScreen /></Shell>;
 
   return (
     <Shell>
@@ -125,6 +355,8 @@ function App() {
         activeTab={activeTab}
         onSelectTab={selectTab}
         updatedAt={data.updated_at}
+        userEmail={session.user?.email}
+        onSignOut={onSignOut}
         sitesOpen={sitesOpen}
         setSitesOpen={setSitesOpen}
         mobileMenuOpen={mobileMenuOpen}
@@ -145,7 +377,75 @@ function App() {
         {activeTab === "Energy" && <EnergyTab location={selected} fleet={fleet} />}
         {activeTab === "Revenue" && <RevenueTab location={selected} fleet={fleet} />}
       </main>
+      {showWelcome && <WelcomeModal user={session.user} closing={welcomeClosing} onClose={closeWelcome} />}
     </Shell>
+  );
+}
+
+function WelcomeModal({ user, closing, onClose }) {
+  return (
+    <section className={`welcome-toast surface ${closing ? "closing" : ""}`} role="status" aria-live="polite">
+      <button type="button" aria-label="Dismiss welcome message" onClick={onClose}>×</button>
+      <span className="eyebrow">Access granted</span>
+      <h2>Welcome, {userDisplayName(user)}</h2>
+      <p>Dashboard session is active.</p>
+    </section>
+  );
+}
+
+function LoginPage({ onSignIn, initialError }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState(initialError || null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSignIn(email.trim(), password);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <main className="login-page">
+      <section className="login-card surface spotlight-card">
+        <span className="eyebrow">Restricted console</span>
+        <h1>Sign in to PLTS Monitor</h1>
+        <p>Put your Email and Password below.</p>
+        <form className="login-form" onSubmit={submit}>
+          <label>
+            <span>Email</span>
+            <input
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            <span>Password</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+          </label>
+          {error && <div className="login-error">{error}</div>}
+          <button type="submit" disabled={submitting}>
+            {submitting ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
+      </section>
+    </main>
   );
 }
 
@@ -180,7 +480,7 @@ function Shell({ children }) {
   );
 }
 
-function TopNav({ activeTab, onSelectTab, updatedAt, sitesOpen, setSitesOpen, mobileMenuOpen, setMobileMenuOpen }) {
+function TopNav({ activeTab, onSelectTab, updatedAt, userEmail, onSignOut, sitesOpen, setSitesOpen, mobileMenuOpen, setMobileMenuOpen }) {
   const updated = updatedAt ? new Date(updatedAt).toLocaleString("en-GB", { hour12: false }) : "-";
   return (
     <nav className="top-nav surface">
@@ -219,6 +519,9 @@ function TopNav({ activeTab, onSelectTab, updatedAt, sitesOpen, setSitesOpen, mo
         <span>Last sync</span>
         <strong>{updated}</strong>
       </div>
+      <button type="button" className="logout-button" title={userEmail || "Signed in"} onClick={onSignOut}>
+        Sign out
+      </button>
       <button
         type="button"
         className="mobile-menu-trigger"
@@ -319,7 +622,7 @@ function HeroPanel({ fleet, selected }) {
           Monitoring PLTS
         </h1>
         <p className="hero-text">
-          Dashboard ringkas untuk memantau kWh, MWh, akumulasi rupiah, dan status lokasi dari Huawei FusionSolar dan Kehua.
+          Integrated monitoring for Huawei FusionSolar and Kehua.
         </p>
         <div className="fleet-strip" aria-label="Fleet summary">
           <MiniMetric label="Sites" value={fleet.stations} />
@@ -602,12 +905,14 @@ function EnergyTab({ location, fleet }) {
         series={series}
         locationName={location?.name}
         action={(
-          <PeriodControl
-            label="Energy chart period"
-            options={[["today", "Today"], ["month", "Month"], ["year", "Year"]]}
-            value={period}
-            onChange={setPeriod}
-          />
+          <>
+            <PeriodControl
+              label="Energy chart period"
+              options={[["today", "Today"], ["month", "Month"], ["year", "Year"]]}
+              value={period}
+              onChange={setPeriod}
+            />
+          </>
         )}
       />
       <div className="content-split">
@@ -650,12 +955,14 @@ function RevenueTab({ location, fleet }) {
         locationName={location?.name}
         moneyMode
         action={(
-          <PeriodControl
-            label="Revenue chart period"
-            options={[["month", "Month"], ["year", "Year"], ["lifetime", "Lifetime"]]}
-            value={period}
-            onChange={setPeriod}
-          />
+          <>
+            <PeriodControl
+              label="Revenue chart period"
+              options={[["month", "Month"], ["year", "Year"], ["lifetime", "Lifetime"]]}
+              value={period}
+              onChange={setPeriod}
+            />
+          </>
         )}
       />
       <div className="content-split">
@@ -736,10 +1043,13 @@ function SeriesEmptyState({ reason }) {
 
 function TimeSeriesChart({ series, moneyMode }) {
   const gradientId = React.useId();
+  const chartWrapRef = useRef(null);
+  const [hoverPoint, setHoverPoint] = useState(null);
   const values = series.values.map((value) => Number.isFinite(Number(value)) ? Number(value) : null);
   const valid = values.filter((value) => value !== null);
   const max = Math.max(...valid, 1);
   const axisValue = (value) => moneyMode ? compactMoney(value) : formatNumber(value, value < 10 ? 1 : 0);
+  const tooltipValue = (value) => moneyMode ? formatRevenue(value, series.unit) : `${formatNumber(value, value < 10 ? 2 : 1)} ${series.unit}`;
   const yTicks = Array.from({ length: 5 }, (_, index) => ({
     value: max - (max * index) / 4,
     top: 12 + index * 18,
@@ -755,23 +1065,44 @@ function TimeSeriesChart({ series, moneyMode }) {
   )))];
   const barWidth = Math.min(7, 72 / Math.max(coords.length, 1));
   const latest = [...coords].reverse().find((point) => point.value !== null);
+  const showHoverPoint = (event, point) => {
+    if (!chartWrapRef.current || point.value === null) return;
+    const bounds = chartWrapRef.current.getBoundingClientRect();
+    const x = event.clientX - bounds.left;
+    const y = event.clientY - bounds.top;
+    setHoverPoint({
+      label: point.label,
+      value: tooltipValue(point.value),
+      x: Math.min(Math.max(x, 92), Math.max(bounds.width - 92, 92)),
+      y: Math.min(Math.max(y - 14, 22), Math.max(bounds.height - 70, 22)),
+    });
+  };
 
   return (
     <div>
-      <div className="time-series-wrap">
+      <div className="time-series-wrap" ref={chartWrapRef} onMouseLeave={() => setHoverPoint(null)}>
         <svg viewBox="0 0 100 100" className="time-series-chart" preserveAspectRatio="none" role="img" aria-label={`${series.title}, ${series.unit}`}>
-          <defs>
-            <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+            <defs>
+              <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
               <stop stopColor="#8b94ff" />
               <stop offset="1" stopColor="#5E6AD2" />
             </linearGradient>
-          </defs>
+            </defs>
           {yTicks.map((tick) => <line key={tick.top} x1="3" x2="98" y1={tick.top} y2={tick.top} className="chart-grid-line" />)}
           <line x1="3" x2="98" y1="84" y2="84" className="chart-axis-line" />
           {coords.map((point, index) => point.y !== null && (
-            <rect key={`${point.label}-${index}`} x={point.x - barWidth / 2} y={point.y} width={barWidth} height={84 - point.y} rx="1" fill={`url(#${gradientId})`}>
-              <title>{point.label}: {axisValue(point.value)} {series.unit}</title>
-            </rect>
+            <rect
+              key={`${point.label}-${index}`}
+              className="chart-hover-bar"
+              x={point.x - barWidth / 2}
+              y={point.y}
+              width={barWidth}
+              height={84 - point.y}
+              rx="1"
+              fill={`url(#${gradientId})`}
+              onMouseEnter={(event) => showHoverPoint(event, point)}
+              onMouseMove={(event) => showHoverPoint(event, point)}
+            />
           ))}
         </svg>
         <div className="time-axis-y" aria-hidden="true">
@@ -780,6 +1111,12 @@ function TimeSeriesChart({ series, moneyMode }) {
         <div className="time-axis-x" aria-hidden="true">
           {tickIndexes.map((index) => <span key={index} style={{ left: `${coords[index].x}%` }}>{coords[index].label}</span>)}
         </div>
+        {hoverPoint && (
+          <div className="chart-hover-tooltip" style={{ left: `${hoverPoint.x}px`, top: `${hoverPoint.y}px` }}>
+            <strong>{hoverPoint.label}</strong>
+            <span>{hoverPoint.value}</span>
+          </div>
+        )}
       </div>
       <div className="series-summary">
         <DataLine label="Records" value={`${valid.length} / ${values.length}`} />
@@ -960,9 +1297,17 @@ function EmptyState({ message }) {
   return <div className="empty-state">{message}</div>;
 }
 
+function LoadingScreen() {
+  return (
+    <div className="loading-screen" role="status" aria-label="Loading">
+      <span className="state-spinner" aria-hidden="true" />
+    </div>
+  );
+}
+
 function StateCard({ title, message }) {
   return (
-    <div className="state-card surface">
+    <div className="state-card surface" role="status">
       <p className="eyebrow">{title}</p>
       <h1>{message}</h1>
     </div>

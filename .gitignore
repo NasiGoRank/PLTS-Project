@@ -1,22 +1,43 @@
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 .venv/
 venv/
 
-# Node
+# Node / frontend
 node_modules/
 dist/
+frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Vercel / deployment state
 .vercel/
 
-# Secrets and browser state
+# Environment files and secrets
 .env
 .env.*
+!.env.example
 !**/.env.example
+creds.txt
+c.txt
+*.pem
+*.key
+*.cert
+
+# Browser state, cookies, and scraper exports
 *Cookies.json
 Cookies.json
+cookies*.json
 *.har
-creds.txt
 *_playwright_profile/
 monitoring_playwright_profile/
 monitoring_discovery_profile/
@@ -27,3 +48,15 @@ live_discovery/
 
 # Supabase local CLI state
 supabase/.temp/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+notes.txt
+DEPLOYMENT_CHECKLIST.md
+kehua.md
+AGENTS.md

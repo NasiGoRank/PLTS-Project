@@ -8,9 +8,11 @@
   },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "dev:local": "vite --host 127.0.0.1",
     "test": "node --test src/*.test.js",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "preview:local": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
     "@tailwindcss/vite": "4.3.1",

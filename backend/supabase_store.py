@@ -135,6 +135,22 @@ class SupabaseStore:
             response = client.table(config.current_table).select("id").limit(1).execute()
         return {"ok": True, "rows": len(response.data or [])}
 
+    def verify_access_token(self, access_token: str) -> dict[str, Any]:
+        """Validate a Supabase Auth access token and return safe user identity fields."""
+        client, _ = self._require()
+        with self._lock:
+            response = client.auth.get_user(access_token)
+
+        user = getattr(response, "user", None)
+        if user is None:
+            raise RuntimeError("Supabase Auth did not return a user")
+
+        return {
+            "id": str(getattr(user, "id", "") or ""),
+            "email": getattr(user, "email", None),
+            "role": getattr(user, "role", None),
+        }
+
     def save_snapshot(
         self,
         *,

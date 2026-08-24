@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -46,7 +46,6 @@ STATE: dict[str, Any] = {
     "last_database_write_at": None,
     "last_history_saved": None,
     "last_site_summary": None,
-    "last_site_auth": None,
 }
 STATE_LOCK = threading.Lock()
 SCRAPE_LOCK = threading.Lock()
@@ -141,52 +140,6 @@ def summarize_sites(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-SAFE_AUTH_KEYS = {
-    "accounts",
-    "auth_check_after_login",
-    "auth_check_before_login",
-    "authorization_found",
-    "app_code",
-    "checked",
-    "cookies",
-    "keep_alive",
-    "loaded",
-    "password_login",
-    "reason",
-    "roarand_found",
-    "status_code",
-    "success",
-    "token_cookie_name",
-    "token_found",
-}
-
-
-def safe_auth_detail(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: safe_auth_detail(item)
-            for key, item in value.items()
-            if key in SAFE_AUTH_KEYS
-        }
-    if isinstance(value, list):
-        return [safe_auth_detail(item) for item in value]
-    if isinstance(value, (bool, int, float)) or value is None:
-        return value
-    if isinstance(value, str):
-        if value in {"ok", "not_configured", "credentials_not_configured"}:
-            return value
-        return value if value.isdigit() else None
-    return None
-
-
-def site_auth_details(result: dict[str, Any]) -> dict[str, Any]:
-    details = {}
-    for site in result.get("sites", []):
-        site_name = site.get("site", "unknown")
-        details[site_name] = safe_auth_detail(site.get("session", {}))
-    return details
-
-
 def scrape_now() -> bool:
     if not SCRAPE_LOCK.acquire(blocking=False):
         return False
@@ -195,12 +148,11 @@ def scrape_now() -> bool:
         set_state(running=True, last_started_at=now_iso(), last_error=None)
         result = run_once(build_scrape_args())
         summaries = summarize_sites(result)
-        auth_details = site_auth_details(result)
         scrape_success = bool(summaries) and all(
             summary.get("success_count", 0) > 0 for summary in summaries.values()
         )
 
-        set_state(last_run_id=result.get("run_id"), last_site_summary=summaries, last_site_auth=auth_details)
+        set_state(last_run_id=result.get("run_id"), last_site_summary=summaries)
 
         if not scrape_success:
             raise RuntimeError("One or more sites returned no successful API calls; keeping the previous Supabase snapshot")
@@ -250,9 +202,36 @@ def refresh_authorized(authorization: str | None, expected_secret: str) -> bool:
     )
 
 
+def bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, separator, token = authorization.partition(" ")
+    if not separator or scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+def require_authenticated_user(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    token = bearer_token(authorization)
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing Supabase access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        return STORE.verify_access_token(token)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid Supabase access token: {type(exc).__name__}",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+
 def refresh_payload(state: dict[str, Any]) -> dict[str, Any]:
     sites = {}
-    auth_details = state.get("last_site_auth") or {}
     for name, summary in (state.get("last_site_summary") or {}).items():
         success_count = int(summary.get("success_count") or 0)
         failed_count = int(summary.get("failed_count") or 0)
@@ -262,7 +241,6 @@ def refresh_payload(state: dict[str, Any]) -> dict[str, Any]:
             "successful_calls": success_count,
             "failed_calls": failed_count,
             "authentication_error": auth_error_count > 0,
-            "authentication": auth_details.get(name, {}),
         }
     return {
         "status": "success" if state.get("last_success") else "failed",
@@ -370,7 +348,7 @@ def ready() -> JSONResponse:
 
 
 @app.get("/api/status")
-def status() -> dict[str, Any]:
+def status(_: dict[str, Any] = Depends(require_authenticated_user)) -> dict[str, Any]:
     response: dict[str, Any] = {
         "scraper": get_state(),
         "database": STORE.public_status(),
@@ -391,7 +369,7 @@ def status() -> dict[str, Any]:
 
 
 @app.get("/api/current")
-def current() -> JSONResponse:
+def current(_: dict[str, Any] = Depends(require_authenticated_user)) -> JSONResponse:
     try:
         row = STORE.get_current_row()
     except Exception as exc:
@@ -423,6 +401,7 @@ def current() -> JSONResponse:
 def history(
     limit: int = Query(default=24, ge=1, le=168),
     include_payload: bool = Query(default=False),
+    _: dict[str, Any] = Depends(require_authenticated_user),
 ) -> JSONResponse:
     try:
         rows = STORE.get_history(limit=limit, include_payload=include_payload)
