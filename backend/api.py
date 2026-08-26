@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -424,8 +424,12 @@ def history(
 
 MIN_REFRESH_INTERVAL_SECONDS = 240  # 4 minutes
 
+
 @app.post("/api/refresh")
-def refresh(authorization: str | None = Header(default=None)) -> JSONResponse:
+def refresh(
+    background_tasks: BackgroundTasks,
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
     expected_secret = os.getenv("REFRESH_SECRET", "").strip()
 
     if not expected_secret:
@@ -439,6 +443,17 @@ def refresh(authorization: str | None = Header(default=None)) -> JSONResponse:
 
     state = get_state()
 
+    # Don't queue another scrape if one is already running.
+    if state.get("running"):
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "busy",
+                "message": "A scrape is already running",
+                "last_run_id": state.get("last_run_id"),
+            },
+        )
+
     last_finished = state.get("last_finished_at")
     last_success = state.get("last_success")
 
@@ -446,6 +461,7 @@ def refresh(authorization: str | None = Header(default=None)) -> JSONResponse:
         last_time = datetime.fromisoformat(
             last_finished.replace("Z", "+00:00")
         )
+
         elapsed = (
             datetime.now(timezone.utc) - last_time
         ).total_seconds()
@@ -463,16 +479,14 @@ def refresh(authorization: str | None = Header(default=None)) -> JSONResponse:
                 },
             )
 
-    if not scrape_now():
-        return JSONResponse(
-            status_code=409,
-            content={
-                "status": "busy",
-                "message": "A scrape is already running",
-            },
-        )
+    # Run scraper AFTER the HTTP response is returned.
+    background_tasks.add_task(scrape_now)
 
     return JSONResponse(
-        status_code=200,
-        content=refresh_payload(get_state()),
+        status_code=202,
+        content={
+            "status": "started",
+            "message": "Monitoring refresh started",
+            "last_run_id": state.get("last_run_id"),
+        },
     )
