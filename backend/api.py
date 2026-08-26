@@ -422,23 +422,57 @@ def history(
     )
 
 
+MIN_REFRESH_INTERVAL_SECONDS = 240  # 4 minutes
+
 @app.post("/api/refresh")
 def refresh(authorization: str | None = Header(default=None)) -> JSONResponse:
     expected_secret = os.getenv("REFRESH_SECRET", "").strip()
+
     if not expected_secret:
-        raise HTTPException(status_code=503, detail="Scheduled refresh is not configured")
-    if not refresh_authorized(authorization, expected_secret):
         raise HTTPException(
-            status_code=401,
-            detail="Invalid refresh credentials",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=503,
+            detail="Scheduled refresh is not configured",
         )
-    if not scrape_now():
-        raise HTTPException(status_code=409, detail="A monitoring refresh is already running")
+
+    if not refresh_authorized(authorization, expected_secret):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     state = get_state()
+
+    last_finished = state.get("last_finished_at")
+    last_success = state.get("last_success")
+
+    if last_success and last_finished:
+        last_time = datetime.fromisoformat(
+            last_finished.replace("Z", "+00:00")
+        )
+        elapsed = (
+            datetime.now(timezone.utc) - last_time
+        ).total_seconds()
+
+        if elapsed < MIN_REFRESH_INTERVAL_SECONDS:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "status": "skipped",
+                    "reason": "refresh_too_recent",
+                    "retry_after_seconds": int(
+                        MIN_REFRESH_INTERVAL_SECONDS - elapsed
+                    ),
+                    "last_run_id": state.get("last_run_id"),
+                },
+            )
+
+    if not scrape_now():
+        return JSONResponse(
+            status_code=409,
+            content={
+                "status": "busy",
+                "message": "A scrape is already running",
+            },
+        )
+
     return JSONResponse(
-        status_code=200 if state.get("last_success") else 502,
-        content=refresh_payload(state),
-        headers={"Cache-Control": "no-store, max-age=0"},
+        status_code=200,
+        content=refresh_payload(get_state()),
     )
