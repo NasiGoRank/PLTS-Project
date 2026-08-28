@@ -167,11 +167,15 @@ function createDatePicker({ name, value, ariaLabel }) {
     const previous = el("button", { type: "button", className: "history-calendar-nav", "aria-label": "Previous month", text: "‹" });
     const title = el("strong", { text: `${MONTHS[viewDate.getMonth()]} ${viewDate.getFullYear()}` });
     const next = el("button", { type: "button", className: "history-calendar-nav", "aria-label": "Next month", text: "›" });
-    previous.addEventListener("click", () => {
+    previous.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1);
       renderCalendar();
     });
-    next.addEventListener("click", () => {
+    next.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1);
       renderCalendar();
     });
@@ -440,7 +444,11 @@ function buildWidget() {
     }
   });
   document.addEventListener("click", (event) => {
-    if (!event.target.closest(".history-field-control")) closePopovers();
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const clickedInsideControl = path.some((node) => (
+      node instanceof Element && node.classList.contains("history-field-control")
+    ));
+    if (!clickedInsideControl) closePopovers();
   });
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
