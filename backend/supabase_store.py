@@ -11,7 +11,7 @@ from typing import Any
 
 from supabase import Client, create_client
 
-from site_rollups import extract_site_daily_rollups
+from site_rollups import extract_site_daily_rollups, extract_site_hourly_rollups
 
 
 def server_key_error(secret_key: str) -> str | None:
@@ -57,6 +57,7 @@ class StoreConfig:
     current_table: str = "monitoring_current"
     history_table: str = "monitoring_snapshots"
     daily_table: str = "monitoring_site_daily"
+    hourly_table: str = "monitoring_site_hourly"
     history_interval_seconds: int = 3600
     history_retention_days: int = 30
 
@@ -104,6 +105,7 @@ class SupabaseStore:
             current_table=os.getenv("SUPABASE_CURRENT_TABLE", "monitoring_current").strip() or "monitoring_current",
             history_table=os.getenv("SUPABASE_HISTORY_TABLE", "monitoring_snapshots").strip() or "monitoring_snapshots",
             daily_table=os.getenv("SUPABASE_DAILY_TABLE", "monitoring_site_daily").strip() or "monitoring_site_daily",
+            hourly_table=os.getenv("SUPABASE_HOURLY_TABLE", "monitoring_site_hourly").strip() or "monitoring_site_hourly",
             history_interval_seconds=history_interval,
             history_retention_days=retention_days,
         )
@@ -119,6 +121,7 @@ class SupabaseStore:
             "current_table": self.config.current_table if self.config else None,
             "history_table": self.config.history_table if self.config else None,
             "daily_table": self.config.daily_table if self.config else None,
+            "hourly_table": self.config.hourly_table if self.config else None,
             "history_interval_seconds": self.config.history_interval_seconds if self.config else None,
             "history_retention_days": self.config.history_retention_days if self.config else None,
             "config_error": self.config_error,
@@ -180,6 +183,7 @@ class SupabaseStore:
                 payload=payload,
                 summary=summary,
             )
+
             daily_rollups_saved = 0
             daily_rollups_error = None
             try:
@@ -195,11 +199,27 @@ class SupabaseStore:
                 # current snapshot or turn a successful scrape into an outage.
                 daily_rollups_error = f"{type(exc).__name__}: {exc}"
 
+            hourly_rollups_saved = 0
+            hourly_rollups_error = None
+            try:
+                hourly_rows = extract_site_hourly_rollups(payload, scraped_at)
+                if hourly_rows:
+                    client.table(config.hourly_table).upsert(
+                        hourly_rows,
+                        on_conflict="platform,station_id,bucket_hour",
+                    ).execute()
+                    hourly_rollups_saved = len(hourly_rows)
+            except Exception as exc:
+                # Hourly history is additive and must never make current monitoring fail.
+                hourly_rollups_error = f"{type(exc).__name__}: {exc}"
+
         return {
             "current_saved": True,
             "history_saved": history_saved,
             "daily_rollups_saved": daily_rollups_saved,
             "daily_rollups_error": daily_rollups_error,
+            "hourly_rollups_saved": hourly_rollups_saved,
+            "hourly_rollups_error": hourly_rollups_error,
             "updated_at": updated_at,
         }
 
