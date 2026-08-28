@@ -4,6 +4,7 @@ import csv
 import io
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -13,6 +14,7 @@ from api import STORE, app, require_authenticated_user
 PAGE_SIZE = 1000
 MAX_DAILY_RANGE_DAYS = 3660
 MAX_HOURLY_RANGE_DAYS = 366
+HOURLY_EXPORT_TIMEZONE = ZoneInfo("Asia/Jakarta")
 
 
 def _parse_date(value: str, field_name: str) -> date:
@@ -81,6 +83,29 @@ def _daily_rows(
         return _fetch_pages(build_query)
 
 
+def _hourly_utc_bounds(start: date, end: date) -> tuple[datetime, datetime]:
+    """Convert inclusive WIB calendar dates into an exclusive UTC query range."""
+    start_local = datetime.combine(start, time.min, tzinfo=HOURLY_EXPORT_TIMEZONE)
+    end_local = datetime.combine(
+        end + timedelta(days=1),
+        time.min,
+        tzinfo=HOURLY_EXPORT_TIMEZONE,
+    )
+    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+
+
+def _timestamp_in_timezone(value: Any, target_timezone: ZoneInfo) -> str | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return str(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(target_timezone).isoformat(sep=" ", timespec="seconds")
+
+
 def _hourly_rows(
     *,
     start: date,
@@ -89,8 +114,7 @@ def _hourly_rows(
     platform: str | None,
 ) -> list[dict[str, Any]]:
     client, config = STORE._require()
-    start_at = datetime.combine(start, time.min, tzinfo=timezone.utc)
-    end_exclusive = datetime.combine(end + timedelta(days=1), time.min, tzinfo=timezone.utc)
+    start_at, end_exclusive = _hourly_utc_bounds(start, end)
 
     def build_query():
         query = (
@@ -112,7 +136,18 @@ def _hourly_rows(
         return query
 
     with STORE._lock:
-        return _fetch_pages(build_query)
+        rows = _fetch_pages(build_query)
+
+    for row in rows:
+        row["bucket_hour_wib"] = _timestamp_in_timezone(
+            row.get("bucket_hour"),
+            HOURLY_EXPORT_TIMEZONE,
+        )
+        row["source_scraped_at_wib"] = _timestamp_in_timezone(
+            row.get("source_scraped_at"),
+            HOURLY_EXPORT_TIMEZONE,
+        )
+    return rows
 
 
 def _csv_response(rows: list[dict[str, Any]], columns: list[tuple[str, str]], filename: str) -> StreamingResponse:
@@ -133,8 +168,14 @@ def _csv_response(rows: list[dict[str, Any]], columns: list[tuple[str, str]], fi
 
 @app.get("/api/history/export")
 def export_history(
-    start_date: str = Query(..., description="Start date in YYYY-MM-DD format"),
-    end_date: str = Query(..., description="End date in YYYY-MM-DD format"),
+    start_date: str = Query(
+        ...,
+        description="Start date in YYYY-MM-DD format; hourly exports use Asia/Jakarta calendar dates",
+    ),
+    end_date: str = Query(
+        ...,
+        description="End date in YYYY-MM-DD format; hourly exports use Asia/Jakarta calendar dates",
+    ),
     resolution: str = Query(default="hourly", pattern="^(daily|hourly)$"),
     station_id: str | None = Query(default=None),
     platform: str | None = Query(default=None),
@@ -158,6 +199,7 @@ def export_history(
         else:
             rows = _hourly_rows(start=start, end=end, station_id=station_id, platform=platform)
             columns = [
+                ("bucket_hour_wib", "Hour (WIB)"),
                 ("bucket_hour", "Hour (UTC)"),
                 ("platform", "Platform"),
                 ("station_id", "Station ID"),
@@ -174,7 +216,8 @@ def export_history(
                 ("cumulative_income", "Cumulative Revenue"),
                 ("currency", "Currency"),
                 ("station_timezone", "Station Timezone"),
-                ("source_scraped_at", "Latest Reading In Hour"),
+                ("source_scraped_at_wib", "Latest Reading (WIB)"),
+                ("source_scraped_at", "Latest Reading (UTC)"),
             ]
     except HTTPException:
         raise
