@@ -153,6 +153,22 @@ async function download(form, button) {
   }
 }
 
+function mountHeaderTrigger(trigger) {
+  const topNav = document.querySelector(".top-nav");
+  const hasSession = Boolean(readSession()?.access_token);
+
+  if (!topNav || !hasSession) {
+    trigger.hidden = true;
+    return;
+  }
+
+  const logoutButton = topNav.querySelector(".logout-button");
+  if (trigger.parentElement !== topNav || trigger.nextElementSibling !== logoutButton) {
+    topNav.insertBefore(trigger, logoutButton || topNav.querySelector(".mobile-menu-trigger") || null);
+  }
+  trigger.hidden = false;
+}
+
 function buildWidget() {
   if (document.querySelector("#history-export-root")) return;
   const dates = defaultDates();
@@ -161,9 +177,17 @@ function buildWidget() {
   const trigger = el("button", {
     type: "button",
     className: "history-export-trigger",
-    text: "Download history",
+    title: "Download history",
+    "aria-label": "Download history",
     "aria-haspopup": "dialog",
   });
+  trigger.innerHTML = `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3v11" />
+      <path d="m8 10 4 4 4-4" />
+      <path d="M5 17v3h14v-3" />
+    </svg>
+  `;
 
   const modal = el("div", {
     className: "history-export-modal",
@@ -207,7 +231,7 @@ function buildWidget() {
   form.append(error, submit);
   panel.append(head, form);
   modal.append(backdrop, panel);
-  root.append(trigger, modal);
+  root.append(modal);
   document.body.append(root);
 
   trigger.addEventListener("click", () => openModal(modal, stationSelect));
@@ -225,11 +249,12 @@ function buildWidget() {
     if (event.key === "Escape" && !modal.hidden) closeModal(modal);
   });
 
-  const updateVisibility = () => {
-    trigger.hidden = !readSession()?.access_token;
-  };
-  updateVisibility();
-  window.setInterval(updateVisibility, 1000);
+  const syncTrigger = () => mountHeaderTrigger(trigger);
+  const observer = new MutationObserver(syncTrigger);
+  observer.observe(document.querySelector("#root") || document.body, { childList: true, subtree: true });
+  window.addEventListener("storage", syncTrigger);
+  syncTrigger();
+  window.setInterval(syncTrigger, 1500);
 }
 
 if (document.readyState === "loading") {

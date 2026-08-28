@@ -1,24 +1,39 @@
 body.history-export-open { overflow: hidden; }
 
 .history-export-trigger {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 70;
-  border: 1px solid rgba(145, 203, 255, 0.28);
-  border-radius: 999px;
-  padding: 12px 18px;
-  background: rgba(8, 25, 43, 0.92);
-  color: #f4fbff;
-  font: inherit;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.34);
-  backdrop-filter: blur(18px);
+  flex: 0 0 auto;
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 14px;
+  padding: 0;
+  background: rgba(255,255,255,.045);
+  color: var(--foreground, #ededf0);
   cursor: pointer;
+  transition: border-color .2s var(--ease, ease), background .2s var(--ease, ease), box-shadow .2s var(--ease, ease), transform .2s var(--ease, ease);
 }
 
-.history-export-trigger:hover { transform: translateY(-1px); }
+.history-export-trigger svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.history-export-trigger:hover {
+  border-color: rgba(94,106,210,.34);
+  background: rgba(94,106,210,.13);
+  box-shadow: 0 0 34px rgba(94,106,210,.10);
+}
+
+.history-export-trigger:active { transform: scale(.98); }
+.history-export-trigger:focus-visible { outline: 2px solid rgba(145, 203, 255, .72); outline-offset: 2px; }
 .history-export-trigger[hidden] { display: none; }
 
 .history-export-modal[hidden] { display: none; }
@@ -60,8 +75,8 @@ body.history-export-open { overflow: hidden; }
 .history-export-submit { border: 0; border-radius: 14px; padding: 13px 16px; background: #d8efff; color: #07111f; font: inherit; font-weight: 800; cursor: pointer; }
 .history-export-submit:disabled { opacity: .62; cursor: progress; }
 
-@media (max-width: 640px) {
-  .history-export-trigger { right: 14px; bottom: 14px; }
+@media (max-width: 760px) {
+  .history-export-trigger { width: 44px; height: 44px; border-radius: 14px; }
   .history-export-panel { border-radius: 20px; padding: 20px; }
   .history-export-date-grid { grid-template-columns: 1fr; }
 }
