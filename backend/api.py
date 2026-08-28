@@ -287,6 +287,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition", "X-Export-Row-Count"],
 )
 
 
@@ -296,7 +297,15 @@ def root() -> dict[str, Any]:
         "service": "PLTS Monitoring API",
         "version": app.version,
         "storage": "Supabase Postgres",
-        "endpoints": ["/health", "/ready", "/api/status", "/api/current", "/api/history", "/api/refresh"],
+        "endpoints": [
+            "/health",
+            "/ready",
+            "/api/status",
+            "/api/current",
+            "/api/history",
+            "/api/history/export",
+            "/api/refresh",
+        ],
     }
 
 
@@ -490,3 +499,7 @@ def refresh(
             "last_run_id": state.get("last_run_id"),
         },
     )
+
+
+# Register history CSV export routes after the core app and auth dependencies exist.
+import history_export_api  # noqa: E402,F401
