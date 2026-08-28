@@ -38,17 +38,48 @@ create table if not exists public.monitoring_site_daily (
 create index if not exists monitoring_site_daily_station_date_idx
   on public.monitoring_site_daily (platform, station_id, bucket_date desc);
 
+create table if not exists public.monitoring_site_hourly (
+  platform text not null,
+  station_id text not null,
+  station_name text not null,
+  bucket_hour timestamptz not null,
+  status text,
+  current_power_kw double precision,
+  daily_energy_kwh double precision,
+  monthly_energy_kwh double precision,
+  yearly_energy_kwh double precision,
+  cumulative_energy_kwh double precision,
+  daily_income double precision,
+  monthly_income double precision,
+  yearly_income double precision,
+  cumulative_income double precision,
+  currency text,
+  station_timezone text,
+  source_scraped_at timestamptz not null,
+  updated_at timestamptz not null default now(),
+  primary key (platform, station_id, bucket_hour)
+);
+
+create index if not exists monitoring_site_hourly_station_hour_idx
+  on public.monitoring_site_hourly (platform, station_id, bucket_hour desc);
+
+create index if not exists monitoring_site_hourly_hour_idx
+  on public.monitoring_site_hourly (bucket_hour desc);
+
 -- The browser never talks to these tables directly. Keep them private and let
 -- the Render backend use a Supabase secret/service-role key.
 alter table public.monitoring_current enable row level security;
 alter table public.monitoring_snapshots enable row level security;
 alter table public.monitoring_site_daily enable row level security;
+alter table public.monitoring_site_hourly enable row level security;
 
 revoke all on table public.monitoring_current from anon, authenticated;
 revoke all on table public.monitoring_snapshots from anon, authenticated;
 revoke all on table public.monitoring_site_daily from anon, authenticated;
+revoke all on table public.monitoring_site_hourly from anon, authenticated;
 
 grant all on table public.monitoring_current to service_role;
 grant all on table public.monitoring_snapshots to service_role;
 grant all on table public.monitoring_site_daily to service_role;
+grant all on table public.monitoring_site_hourly to service_role;
 grant usage, select on sequence public.monitoring_snapshots_id_seq to service_role;

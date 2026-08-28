@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import io
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Iterable
+from typing import Any
 
 from fastapi import Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -12,7 +12,7 @@ from api import STORE, app, require_authenticated_user
 
 PAGE_SIZE = 1000
 MAX_DAILY_RANGE_DAYS = 3660
-MAX_HOURLY_RANGE_DAYS = 31
+MAX_HOURLY_RANGE_DAYS = 366
 
 
 def _parse_date(value: str, field_name: str) -> date:
@@ -81,73 +81,38 @@ def _daily_rows(
         return _fetch_pages(build_query)
 
 
-def _snapshot_rows(*, start: date, end: date) -> list[dict[str, Any]]:
+def _hourly_rows(
+    *,
+    start: date,
+    end: date,
+    station_id: str | None,
+    platform: str | None,
+) -> list[dict[str, Any]]:
     client, config = STORE._require()
     start_at = datetime.combine(start, time.min, tzinfo=timezone.utc)
     end_exclusive = datetime.combine(end + timedelta(days=1), time.min, tzinfo=timezone.utc)
 
     def build_query():
-        return (
-            client.table(config.history_table)
-            .select("run_id,scraped_at,payload")
-            .gte("scraped_at", start_at.isoformat())
-            .lt("scraped_at", end_exclusive.isoformat())
-            .order("scraped_at")
+        query = (
+            client.table(config.hourly_table)
+            .select(
+                "bucket_hour,platform,station_id,station_name,status,current_power_kw,"
+                "daily_energy_kwh,monthly_energy_kwh,yearly_energy_kwh,cumulative_energy_kwh,"
+                "daily_income,monthly_income,yearly_income,cumulative_income,currency,"
+                "station_timezone,source_scraped_at"
+            )
+            .gte("bucket_hour", start_at.isoformat())
+            .lt("bucket_hour", end_exclusive.isoformat())
+            .order("bucket_hour")
         )
+        if station_id:
+            query = query.eq("station_id", station_id)
+        if platform:
+            query = query.eq("platform", platform)
+        return query
 
     with STORE._lock:
         return _fetch_pages(build_query)
-
-
-def _flatten_snapshot_rows(
-    snapshots: Iterable[dict[str, Any]],
-    *,
-    station_id: str | None,
-    platform: str | None,
-) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for snapshot in snapshots:
-        payload = snapshot.get("payload")
-        by_site = payload.get("by_site") if isinstance(payload, dict) else None
-        if not isinstance(by_site, dict):
-            continue
-
-        for site_platform, site in by_site.items():
-            if platform and str(site_platform) != platform:
-                continue
-            if not isinstance(site, dict):
-                continue
-            stations = site.get("stations") if isinstance(site.get("stations"), list) else []
-            for station in stations:
-                if not isinstance(station, dict):
-                    continue
-                current_station_id = station.get("station_id")
-                if current_station_id in (None, ""):
-                    continue
-                current_station_id = str(current_station_id)
-                if station_id and current_station_id != station_id:
-                    continue
-
-                rows.append({
-                    "scraped_at": snapshot.get("scraped_at"),
-                    "run_id": snapshot.get("run_id"),
-                    "platform": str(site_platform),
-                    "station_id": current_station_id,
-                    "station_name": station.get("name") or current_station_id,
-                    "status": station.get("status"),
-                    "current_power_kw": station.get("current_power_kw"),
-                    "daily_energy_kwh": station.get("daily_energy_kwh"),
-                    "monthly_energy_kwh": station.get("monthly_energy_kwh"),
-                    "yearly_energy_kwh": station.get("yearly_energy_kwh"),
-                    "cumulative_energy_kwh": station.get("cumulative_energy_kwh"),
-                    "daily_income": station.get("daily_income"),
-                    "monthly_income": station.get("monthly_income"),
-                    "yearly_income": station.get("yearly_income"),
-                    "cumulative_income": station.get("cumulative_income"),
-                    "income_currency": station.get("income_currency"),
-                    "timezone": station.get("timezone"),
-                })
-    return rows
 
 
 def _csv_response(rows: list[dict[str, Any]], columns: list[tuple[str, str]], filename: str) -> StreamingResponse:
@@ -170,7 +135,7 @@ def _csv_response(rows: list[dict[str, Any]], columns: list[tuple[str, str]], fi
 def export_history(
     start_date: str = Query(..., description="Start date in YYYY-MM-DD format"),
     end_date: str = Query(..., description="End date in YYYY-MM-DD format"),
-    resolution: str = Query(default="daily", pattern="^(daily|hourly)$"),
+    resolution: str = Query(default="hourly", pattern="^(daily|hourly)$"),
     station_id: str | None = Query(default=None),
     platform: str | None = Query(default=None),
     _: dict[str, Any] = Depends(require_authenticated_user),
@@ -191,11 +156,9 @@ def export_history(
                 ("source_scraped_at", "Source Scraped At"),
             ]
         else:
-            snapshots = _snapshot_rows(start=start, end=end)
-            rows = _flatten_snapshot_rows(snapshots, station_id=station_id, platform=platform)
+            rows = _hourly_rows(start=start, end=end, station_id=station_id, platform=platform)
             columns = [
-                ("scraped_at", "Timestamp"),
-                ("run_id", "Run ID"),
+                ("bucket_hour", "Hour (UTC)"),
                 ("platform", "Platform"),
                 ("station_id", "Station ID"),
                 ("station_name", "Station Name"),
@@ -209,8 +172,9 @@ def export_history(
                 ("monthly_income", "Monthly Revenue"),
                 ("yearly_income", "Yearly Revenue"),
                 ("cumulative_income", "Cumulative Revenue"),
-                ("income_currency", "Currency"),
-                ("timezone", "Timezone"),
+                ("currency", "Currency"),
+                ("station_timezone", "Station Timezone"),
+                ("source_scraped_at", "Latest Reading In Hour"),
             ]
     except HTTPException:
         raise
