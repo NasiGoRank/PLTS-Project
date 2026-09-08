@@ -53,6 +53,30 @@ def _fetch_pages(build_query) -> list[dict[str, Any]]:
     return rows
 
 
+def _timestamp_parts(
+    value: Any,
+    target_timezone: timezone | ZoneInfo = timezone.utc,
+) -> tuple[str | None, str | None]:
+    """Return separate YYYY-MM-DD and HH:MM:SS values in the requested timezone."""
+    if value in (None, ""):
+        return None, None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        text = str(value)
+        if "T" in text:
+            date_part, time_part = text.split("T", 1)
+            return date_part or None, time_part or None
+        if " " in text:
+            date_part, time_part = text.split(" ", 1)
+            return date_part or None, time_part or None
+        return text, None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    converted = parsed.astimezone(target_timezone)
+    return converted.date().isoformat(), converted.time().replace(microsecond=0).isoformat()
+
+
 def _daily_rows(
     *,
     start: date,
@@ -80,7 +104,13 @@ def _daily_rows(
         return query
 
     with STORE._lock:
-        return _fetch_pages(build_query)
+        rows = _fetch_pages(build_query)
+
+    for row in rows:
+        scraped_date, scraped_time = _timestamp_parts(row.get("source_scraped_at"), timezone.utc)
+        row["source_scraped_date_utc"] = scraped_date
+        row["source_scraped_time_utc"] = scraped_time
+    return rows
 
 
 def _hourly_utc_bounds(start: date, end: date) -> tuple[datetime, datetime]:
@@ -92,18 +122,6 @@ def _hourly_utc_bounds(start: date, end: date) -> tuple[datetime, datetime]:
         tzinfo=HOURLY_EXPORT_TIMEZONE,
     )
     return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
-
-
-def _timestamp_in_timezone(value: Any, target_timezone: ZoneInfo) -> str | None:
-    if value in (None, ""):
-        return None
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return str(value)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(target_timezone).isoformat(sep=" ", timespec="seconds")
 
 
 def _hourly_rows(
@@ -139,14 +157,28 @@ def _hourly_rows(
         rows = _fetch_pages(build_query)
 
     for row in rows:
-        row["bucket_hour_wib"] = _timestamp_in_timezone(
+        hour_date_wib, hour_time_wib = _timestamp_parts(
             row.get("bucket_hour"),
             HOURLY_EXPORT_TIMEZONE,
         )
-        row["source_scraped_at_wib"] = _timestamp_in_timezone(
+        hour_date_utc, hour_time_utc = _timestamp_parts(row.get("bucket_hour"), timezone.utc)
+        reading_date_wib, reading_time_wib = _timestamp_parts(
             row.get("source_scraped_at"),
             HOURLY_EXPORT_TIMEZONE,
         )
+        reading_date_utc, reading_time_utc = _timestamp_parts(
+            row.get("source_scraped_at"),
+            timezone.utc,
+        )
+
+        row["bucket_hour_date_wib"] = hour_date_wib
+        row["bucket_hour_time_wib"] = hour_time_wib
+        row["bucket_hour_date_utc"] = hour_date_utc
+        row["bucket_hour_time_utc"] = hour_time_utc
+        row["source_scraped_date_wib"] = reading_date_wib
+        row["source_scraped_time_wib"] = reading_time_wib
+        row["source_scraped_date_utc"] = reading_date_utc
+        row["source_scraped_time_utc"] = reading_time_utc
     return rows
 
 
@@ -194,13 +226,16 @@ def export_history(
                 ("energy_kwh", "Energy (kWh)"),
                 ("revenue_amount", "Revenue"),
                 ("currency", "Currency"),
-                ("source_scraped_at", "Source Scraped At"),
+                ("source_scraped_date_utc", "Source Scraped Date (UTC)"),
+                ("source_scraped_time_utc", "Source Scraped Time (UTC)"),
             ]
         else:
             rows = _hourly_rows(start=start, end=end, station_id=station_id, platform=platform)
             columns = [
-                ("bucket_hour_wib", "Hour (WIB)"),
-                ("bucket_hour", "Hour (UTC)"),
+                ("bucket_hour_date_wib", "Hour Date (WIB)"),
+                ("bucket_hour_time_wib", "Hour Time (WIB)"),
+                ("bucket_hour_date_utc", "Hour Date (UTC)"),
+                ("bucket_hour_time_utc", "Hour Time (UTC)"),
                 ("platform", "Platform"),
                 ("station_id", "Station ID"),
                 ("station_name", "Station Name"),
@@ -216,8 +251,10 @@ def export_history(
                 ("cumulative_income", "Cumulative Revenue"),
                 ("currency", "Currency"),
                 ("station_timezone", "Station Timezone"),
-                ("source_scraped_at_wib", "Latest Reading (WIB)"),
-                ("source_scraped_at", "Latest Reading (UTC)"),
+                ("source_scraped_date_wib", "Latest Reading Date (WIB)"),
+                ("source_scraped_time_wib", "Latest Reading Time (WIB)"),
+                ("source_scraped_date_utc", "Latest Reading Date (UTC)"),
+                ("source_scraped_time_utc", "Latest Reading Time (UTC)"),
             ]
     except HTTPException:
         raise
