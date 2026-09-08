@@ -14,7 +14,7 @@ from api import STORE, app, require_authenticated_user
 PAGE_SIZE = 1000
 MAX_DAILY_RANGE_DAYS = 3660
 MAX_HOURLY_RANGE_DAYS = 366
-HOURLY_EXPORT_TIMEZONE = ZoneInfo("Asia/Jakarta")
+EXPORT_TIMEZONE = ZoneInfo("Asia/Jakarta")
 
 
 def _parse_date(value: str, field_name: str) -> date:
@@ -55,7 +55,7 @@ def _fetch_pages(build_query) -> list[dict[str, Any]]:
 
 def _timestamp_parts(
     value: Any,
-    target_timezone: timezone | ZoneInfo = timezone.utc,
+    target_timezone: timezone | ZoneInfo = EXPORT_TIMEZONE,
 ) -> tuple[str | None, str | None]:
     """Return separate YYYY-MM-DD and HH:MM:SS values in the requested timezone."""
     if value in (None, ""):
@@ -107,19 +107,19 @@ def _daily_rows(
         rows = _fetch_pages(build_query)
 
     for row in rows:
-        scraped_date, scraped_time = _timestamp_parts(row.get("source_scraped_at"), timezone.utc)
-        row["source_scraped_date_utc"] = scraped_date
-        row["source_scraped_time_utc"] = scraped_time
+        scraped_date, scraped_time = _timestamp_parts(row.get("source_scraped_at"))
+        row["source_scraped_date_wib"] = scraped_date
+        row["source_scraped_time_wib"] = scraped_time
     return rows
 
 
 def _hourly_utc_bounds(start: date, end: date) -> tuple[datetime, datetime]:
     """Convert inclusive WIB calendar dates into an exclusive UTC query range."""
-    start_local = datetime.combine(start, time.min, tzinfo=HOURLY_EXPORT_TIMEZONE)
+    start_local = datetime.combine(start, time.min, tzinfo=EXPORT_TIMEZONE)
     end_local = datetime.combine(
         end + timedelta(days=1),
         time.min,
-        tzinfo=HOURLY_EXPORT_TIMEZONE,
+        tzinfo=EXPORT_TIMEZONE,
     )
     return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
@@ -157,28 +157,13 @@ def _hourly_rows(
         rows = _fetch_pages(build_query)
 
     for row in rows:
-        hour_date_wib, hour_time_wib = _timestamp_parts(
-            row.get("bucket_hour"),
-            HOURLY_EXPORT_TIMEZONE,
-        )
-        hour_date_utc, hour_time_utc = _timestamp_parts(row.get("bucket_hour"), timezone.utc)
-        reading_date_wib, reading_time_wib = _timestamp_parts(
-            row.get("source_scraped_at"),
-            HOURLY_EXPORT_TIMEZONE,
-        )
-        reading_date_utc, reading_time_utc = _timestamp_parts(
-            row.get("source_scraped_at"),
-            timezone.utc,
-        )
+        hour_date_wib, hour_time_wib = _timestamp_parts(row.get("bucket_hour"))
+        reading_date_wib, reading_time_wib = _timestamp_parts(row.get("source_scraped_at"))
 
         row["bucket_hour_date_wib"] = hour_date_wib
         row["bucket_hour_time_wib"] = hour_time_wib
-        row["bucket_hour_date_utc"] = hour_date_utc
-        row["bucket_hour_time_utc"] = hour_time_utc
         row["source_scraped_date_wib"] = reading_date_wib
         row["source_scraped_time_wib"] = reading_time_wib
-        row["source_scraped_date_utc"] = reading_date_utc
-        row["source_scraped_time_utc"] = reading_time_utc
     return rows
 
 
@@ -202,11 +187,11 @@ def _csv_response(rows: list[dict[str, Any]], columns: list[tuple[str, str]], fi
 def export_history(
     start_date: str = Query(
         ...,
-        description="Start date in YYYY-MM-DD format; hourly exports use Asia/Jakarta calendar dates",
+        description="Start date in YYYY-MM-DD format; exports use Asia/Jakarta calendar dates",
     ),
     end_date: str = Query(
         ...,
-        description="End date in YYYY-MM-DD format; hourly exports use Asia/Jakarta calendar dates",
+        description="End date in YYYY-MM-DD format; exports use Asia/Jakarta calendar dates",
     ),
     resolution: str = Query(default="hourly", pattern="^(daily|hourly)$"),
     station_id: str | None = Query(default=None),
@@ -226,16 +211,14 @@ def export_history(
                 ("energy_kwh", "Energy (kWh)"),
                 ("revenue_amount", "Revenue"),
                 ("currency", "Currency"),
-                ("source_scraped_date_utc", "Source Scraped Date (UTC)"),
-                ("source_scraped_time_utc", "Source Scraped Time (UTC)"),
+                ("source_scraped_date_wib", "Source Scraped Date (WIB)"),
+                ("source_scraped_time_wib", "Source Scraped Time (WIB)"),
             ]
         else:
             rows = _hourly_rows(start=start, end=end, station_id=station_id, platform=platform)
             columns = [
                 ("bucket_hour_date_wib", "Hour Date (WIB)"),
                 ("bucket_hour_time_wib", "Hour Time (WIB)"),
-                ("bucket_hour_date_utc", "Hour Date (UTC)"),
-                ("bucket_hour_time_utc", "Hour Time (UTC)"),
                 ("platform", "Platform"),
                 ("station_id", "Station ID"),
                 ("station_name", "Station Name"),
@@ -253,8 +236,6 @@ def export_history(
                 ("station_timezone", "Station Timezone"),
                 ("source_scraped_date_wib", "Latest Reading Date (WIB)"),
                 ("source_scraped_time_wib", "Latest Reading Time (WIB)"),
-                ("source_scraped_date_utc", "Latest Reading Date (UTC)"),
-                ("source_scraped_time_utc", "Latest Reading Time (UTC)"),
             ]
     except HTTPException:
         raise
