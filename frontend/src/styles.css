@@ -1675,16 +1675,22 @@ button {
   padding: 20px;
 }
 
-.login-card {
+.login-stack {
+  display: grid;
   width: min(100%, 460px);
+  justify-items: center;
+  gap: 22px;
+}
+
+.login-card {
+  width: 100%;
   padding: 28px;
 }
 
 .login-logo {
   display: block;
-  width: 128px;
+  width: 118px;
   height: auto;
-  margin: 0 auto 20px;
   object-fit: contain;
   filter: drop-shadow(0 12px 28px rgba(0, 0, 0, .28));
 }
