@@ -1675,36 +1675,50 @@ button {
   padding: 20px;
 }
 
-.login-stack {
+.login-shell {
   display: grid;
-  width: min(100%, 460px);
-  justify-items: center;
-  gap: 22px;
+  grid-template-columns: minmax(220px, .82fr) minmax(0, 1.38fr);
+  width: min(100%, 900px);
+  gap: 40px;
+  align-items: center;
+  padding: 36px 40px;
 }
 
-.login-card {
-  width: 100%;
-  padding: 28px;
+.login-logo-panel {
+  display: grid;
+  min-height: 250px;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(94,106,210,.12), transparent 58%),
+    rgba(255,255,255,.025);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
 }
 
 .login-logo {
   display: block;
-  width: 118px;
+  width: 150px;
+  max-width: 72%;
   height: auto;
   object-fit: contain;
-  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, .28));
+  filter: drop-shadow(0 14px 32px rgba(0, 0, 0, .34));
 }
 
-.login-card h1 {
-  margin: 10px 0 10px;
-  font-size: clamp(2rem, 5vw, 3.5rem);
+.login-form-panel {
+  min-width: 0;
+}
+
+.login-form-panel h1 {
+  margin: 0 0 10px;
+  font-size: clamp(2.2rem, 5vw, 3.75rem);
   font-weight: 650;
   letter-spacing: -.05em;
   line-height: .98;
 }
 
-.login-card p {
-  margin: 0 0 22px;
+.login-form-panel p {
+  margin: 0 0 24px;
   color: var(--muted);
   line-height: 1.55;
 }
@@ -1973,6 +1987,31 @@ button {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .login-page {
+    min-height: calc(100vh - 100px);
+    padding: 16px;
+  }
+
+  .login-shell {
+    grid-template-columns: 1fr;
+    width: min(100%, 520px);
+    gap: 24px;
+    padding: 22px;
+  }
+
+  .login-logo-panel {
+    min-height: 170px;
+    border-radius: 20px;
+  }
+
+  .login-logo {
+    width: 112px;
+  }
+
+  .login-form-panel h1 {
+    font-size: clamp(2rem, 11vw, 3rem);
   }
 
   .sites-panel,
