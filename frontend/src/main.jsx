@@ -414,40 +414,42 @@ function LoginPage({ onSignIn, initialError }) {
 
   return (
     <main className="login-page">
-      <div className="login-stack">
-        <img className="login-logo" src="/pnj-logo.svg" alt="Politeknik Negeri Jakarta" />
-        <section className="login-card surface spotlight-card">
-          <span className="eyebrow">Restricted console</span>
-        <h1>Sign in to PLTS Monitor</h1>
-        <p>Put your Email and Password below.</p>
-        <form className="login-form" onSubmit={submit}>
-          <label>
-            <span>Email</span>
-            <input
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-          </label>
-          <label>
-            <span>Password</span>
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </label>
-          {error && <div className="login-error">{error}</div>}
-          <button type="submit" disabled={submitting}>
-            {submitting ? "Signing in..." : "Sign in"}
-          </button>
-        </form>
-        </section>
-      </div>
+      <section className="login-shell surface spotlight-card">
+        <div className="login-logo-panel">
+          <img className="login-logo" src="/pnj-logo.svg" alt="Politeknik Negeri Jakarta" />
+        </div>
+
+        <div className="login-form-panel">
+          <h1>Sign in to PLTS Monitor</h1>
+          <p>Put your email and password below.</p>
+          <form className="login-form" onSubmit={submit}>
+            <label>
+              <span>Email</span>
+              <input
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
+            </label>
+            <label>
+              <span>Password</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+              />
+            </label>
+            {error && <div className="login-error">{error}</div>}
+            <button type="submit" disabled={submitting}>
+              {submitting ? "Signing in..." : "Sign in"}
+            </button>
+          </form>
+        </div>
+      </section>
     </main>
   );
 }
