@@ -414,9 +414,10 @@ function LoginPage({ onSignIn, initialError }) {
 
   return (
     <main className="login-page">
-      <section className="login-card surface spotlight-card">
+      <div className="login-stack">
         <img className="login-logo" src="/pnj-logo.svg" alt="Politeknik Negeri Jakarta" />
-        <span className="eyebrow">Restricted console</span>
+        <section className="login-card surface spotlight-card">
+          <span className="eyebrow">Restricted console</span>
         <h1>Sign in to PLTS Monitor</h1>
         <p>Put your Email and Password below.</p>
         <form className="login-form" onSubmit={submit}>
@@ -445,7 +446,8 @@ function LoginPage({ onSignIn, initialError }) {
             {submitting ? "Signing in..." : "Sign in"}
           </button>
         </form>
-      </section>
+        </section>
+      </div>
     </main>
   );
 }
