@@ -415,6 +415,7 @@ function LoginPage({ onSignIn, initialError }) {
   return (
     <main className="login-page">
       <section className="login-card surface spotlight-card">
+        <img className="login-logo" src="/pnj-logo.svg" alt="Politeknik Negeri Jakarta" />
         <span className="eyebrow">Restricted console</span>
         <h1>Sign in to PLTS Monitor</h1>
         <p>Put your Email and Password below.</p>
@@ -495,7 +496,7 @@ function TopNav({ activeTab, onSelectTab, updatedAt, userEmail, onSignOut, sites
         <span>Sites</span>
       </button>
       <div className="brand">
-        <span className="status-dot" />
+        <img className="brand-logo" src="/pnj-logo.svg" alt="" aria-hidden="true" />
         <div>
           <strong>PLTS Monitor</strong>
           <span>Huawei + Kehua</span>

@@ -189,6 +189,14 @@ button {
   flex: 0 0 auto;
 }
 
+.brand-logo {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
 .site-trigger,
 .mobile-menu-trigger,
 .logout-button,
@@ -1672,6 +1680,15 @@ button {
   padding: 28px;
 }
 
+.login-logo {
+  display: block;
+  width: 128px;
+  height: auto;
+  margin: 0 auto 20px;
+  object-fit: contain;
+  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, .28));
+}
+
 .login-card h1 {
   margin: 10px 0 10px;
   font-size: clamp(2rem, 5vw, 3.5rem);
@@ -1937,6 +1954,12 @@ button {
   .brand {
     flex: 1 1 auto;
     min-width: 0;
+  }
+
+  .brand-logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
   }
 
   .brand strong,
