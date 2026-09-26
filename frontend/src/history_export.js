@@ -446,11 +446,11 @@ function buildWidget() {
   });
   const formatDropdown = createDropdown({
     name: "format",
-    value: "xlsx",
+    value: "csv",
     ariaLabel: "Select download format",
     options: [
-      { value: "xlsx", label: "Excel (.xlsx)", meta: "Formatted workbook" },
       { value: "csv", label: "CSV (.csv)", meta: "Universal spreadsheet format" },
+      { value: "xlsx", label: "Excel (.xlsx)", meta: "Formatted workbook" },
     ],
   });
 
