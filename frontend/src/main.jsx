@@ -415,8 +415,12 @@ function LoginPage({ onSignIn, initialError }) {
   return (
     <main className="login-page">
       <section className="login-shell surface spotlight-card">
-        <div className="login-logo-panel">
-          <img className="login-logo" src="/pnj-logo.svg" alt="Politeknik Negeri Jakarta" />
+        <div className="login-identity">
+          <img className="login-plts-logo" src="/plts-logo.webp" alt="PLTS Monitor" />
+          <div className="login-campus-brand">
+            <img src="/pnj-logo.svg" alt="" aria-hidden="true" />
+            <span>Politeknik Negeri Jakarta</span>
+          </div>
         </div>
 
         <div className="login-form-panel">
