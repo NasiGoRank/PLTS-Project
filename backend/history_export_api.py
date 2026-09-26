@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import csv
 import io
+import re
+import unicodedata
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from api import STORE, app, require_authenticated_user
 
@@ -183,6 +188,97 @@ def _csv_response(rows: list[dict[str, Any]], columns: list[tuple[str, str]], fi
     return StreamingResponse(iter([content]), media_type="text/csv; charset=utf-8", headers=headers)
 
 
+def _xlsx_response(
+    rows: list[dict[str, Any]],
+    columns: list[tuple[str, str]],
+    filename: str,
+) -> StreamingResponse:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "History"
+    sheet.freeze_panes = "A2"
+    sheet.append([label for _, label in columns])
+
+    header_fill = PatternFill("solid", fgColor="1F4E78")
+    header_font = Font(color="FFFFFF", bold=True)
+    header_alignment = Alignment(vertical="center")
+    for cell in sheet[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = header_alignment
+
+    for row in rows:
+        sheet.append([row.get(key) for key, _ in columns])
+
+    if columns:
+        sheet.auto_filter.ref = sheet.dimensions
+
+    sample_rows = rows[:500]
+    for index, (key, label) in enumerate(columns, start=1):
+        width = len(label)
+        for row in sample_rows:
+            value = row.get(key)
+            if value is not None:
+                width = max(width, len(str(value)))
+        sheet.column_dimensions[get_column_letter(index)].width = min(max(width + 2, 12), 34)
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Cache-Control": "no-store, max-age=0",
+        "X-Export-Row-Count": str(len(rows)),
+    }
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
+
+
+def _filename_token(value: Any, fallback: str) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = text.encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-")
+    return (text[:80] or fallback).strip("-")
+
+
+def _export_filename(
+    *,
+    rows: list[dict[str, Any]],
+    start: date,
+    end: date,
+    resolution: str,
+    file_format: str,
+    station_id: str | None,
+    platform: str | None,
+    station_name: str | None,
+    generated_at: datetime | None = None,
+) -> str:
+    if station_id:
+        row_station_name = next(
+            (str(row.get("station_name")) for row in rows if row.get("station_name")),
+            None,
+        )
+        site_name = station_name or row_station_name or station_id
+        platform_token = _filename_token(platform, "Platform") if platform else None
+        site_token = _filename_token(site_name, "Selected-Site")
+        scope = "Site-" + "-".join(part for part in (platform_token, site_token) if part)
+    else:
+        scope = "All-Sites"
+
+    exported_at = (generated_at or datetime.now(EXPORT_TIMEZONE)).astimezone(EXPORT_TIMEZONE)
+    exported_stamp = exported_at.strftime("%Y-%m-%d_%H-%M-WIB")
+    extension = "xlsx" if file_format == "xlsx" else "csv"
+    return (
+        f"PLTS-History_{scope}_{resolution.title()}_"
+        f"{start.isoformat()}_to_{end.isoformat()}_"
+        f"Exported-{exported_stamp}.{extension}"
+    )
+
+
 @app.get("/api/history/export")
 def export_history(
     start_date: str = Query(
@@ -194,7 +290,9 @@ def export_history(
         description="End date in YYYY-MM-DD format; exports use Asia/Jakarta calendar dates",
     ),
     resolution: str = Query(default="hourly", pattern="^(daily|hourly)$"),
+    file_format: str = Query(default="csv", alias="format", pattern="^(csv|xlsx)$"),
     station_id: str | None = Query(default=None),
+    station_name: str | None = Query(default=None, max_length=160),
     platform: str | None = Query(default=None),
     _: dict[str, Any] = Depends(require_authenticated_user),
 ) -> StreamingResponse:
@@ -245,5 +343,16 @@ def export_history(
             detail=f"History export is unavailable: {type(exc).__name__}: {exc}",
         ) from exc
 
-    filename = f"plts-history-{resolution}-{start.isoformat()}-to-{end.isoformat()}.csv"
+    filename = _export_filename(
+        rows=rows,
+        start=start,
+        end=end,
+        resolution=resolution,
+        file_format=file_format,
+        station_id=station_id,
+        platform=platform,
+        station_name=station_name,
+    )
+    if file_format == "xlsx":
+        return _xlsx_response(rows, columns, filename)
     return _csv_response(rows, columns, filename)
