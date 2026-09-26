@@ -263,7 +263,7 @@ def _export_filename(
             None,
         )
         site_name = station_name or row_station_name or station_id
-        platform_token = _filename_token(platform, "Platform") if platform else None
+        platform_token = _filename_token(str(platform).title(), "Platform") if platform else None
         site_token = _filename_token(site_name, "Selected-Site")
         scope = "Site-" + "-".join(part for part in (platform_token, site_token) if part)
     else:
