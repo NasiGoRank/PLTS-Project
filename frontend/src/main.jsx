@@ -416,7 +416,7 @@ function LoginPage({ onSignIn, initialError }) {
     <main className="login-page">
       <section className="login-shell surface spotlight-card">
         <div className="login-identity">
-          <img className="login-plts-logo" src="/plts-logo.webp" alt="PLTS Monitor" />
+          <img className="login-plts-logo" src="/plts-logo.svg" alt="PLTS Monitor" />
           <div className="login-campus-brand">
             <img src="/pnj-logo.svg" alt="" aria-hidden="true" />
             <span>Politeknik Negeri Jakarta</span>
