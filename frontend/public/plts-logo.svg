@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">PLTS Monitor logo</title>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8fffff"/>
+      <stop offset=".38" stop-color="#20d8ff"/>
+      <stop offset=".68" stop-color="#225cff"/>
+      <stop offset="1" stop-color="#bf38f4"/>
+    </linearGradient>
+    <linearGradient id="g2" x1=".15" y1=".05" x2=".85" y2=".95">
+      <stop offset="0" stop-color="#91ffff"/>
+      <stop offset=".45" stop-color="#25bfff"/>
+      <stop offset="1" stop-color="#a832ef"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M154 42c38 4 65 35 65 79 0 51-33 92-82 99"
+          stroke="url(#g)" stroke-width="10" filter="url(#glow)"/>
+    <circle cx="157" cy="41" r="10" fill="url(#g2)" stroke="#39eaff" stroke-width="4"/>
+    <circle cx="218" cy="91" r="10" fill="url(#g2)" stroke="#39eaff" stroke-width="4"/>
+    <circle cx="199" cy="176" r="10" fill="url(#g2)" stroke="#39eaff" stroke-width="4"/>
+  </g>
+
+  <path d="M61 106a54 54 0 0 1 108 0Z" fill="url(#g2)" filter="url(#glow)"/>
+
+  <g fill="url(#g)" stroke="#72f7ff" stroke-width="1.4" filter="url(#glow)">
+    <path d="M35 113h52l17 33H53Z"/>
+    <path d="M91 113h52l17 33h-52Z"/>
+    <path d="M147 113h42l17 33h-42Z"/>
+    <path d="M54 151h52l18 35H72Z"/>
+    <path d="M111 151h52l18 35h-52Z"/>
+    <path d="M168 151h38l14 28-7 7h-28Z"/>
+  </g>
+
+  <g fill="url(#g)" filter="url(#glow)">
+    <rect x="78" y="29" width="10" height="28" rx="5"/>
+    <rect x="48" y="43" width="10" height="28" rx="5" transform="rotate(-43 53 57)"/>
+    <rect x="29" y="70" width="10" height="28" rx="5" transform="rotate(-69 34 84)"/>
+  </g>
+</svg>
