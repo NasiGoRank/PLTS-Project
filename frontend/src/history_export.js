@@ -144,7 +144,14 @@ function createDropdown({ name, options, value = "", ariaLabel }) {
   control.addEventListener("click", () => togglePopover(control, menu));
   wrapper.append(hidden, control, menu);
   setOptions(options);
-  return { node: wrapper, input: hidden, control, menu, setOptions };
+  return {
+    node: wrapper,
+    input: hidden,
+    control,
+    menu,
+    setOptions,
+    getSelected: () => items.find((item) => item.value === hidden.value) || null,
+  };
 }
 
 function createDatePicker({ name, value, ariaLabel }) {
@@ -262,7 +269,7 @@ async function authorizedFetch(path, options = {}) {
 }
 
 async function loadStations(dropdown) {
-  dropdown.setOptions([{ value: "", label: "All stations", meta: "Fleet" }]);
+  dropdown.setOptions([{ value: "", label: "All sites", meta: "Fleet" }]);
   const response = await authorizedFetch(`/api/current?ts=${Date.now()}`);
   if (!response.ok) throw new Error(`Unable to load stations (${response.status}).`);
   const data = await response.json();
@@ -278,7 +285,7 @@ async function loadStations(dropdown) {
     });
   });
   stations.sort((a, b) => a.label.localeCompare(b.label));
-  dropdown.setOptions([{ value: "", label: "All stations", meta: "Fleet" }, ...stations]);
+  dropdown.setOptions([{ value: "", label: "All sites", meta: "Fleet" }, ...stations]);
 }
 
 function openModal(modal, stationDropdown) {
@@ -296,27 +303,35 @@ function closeModal(modal) {
   document.body.classList.remove("history-export-open");
 }
 
-async function download(form, button) {
+async function download(form, button, stationDropdown) {
   setError();
   const formData = new FormData(form);
   const startDate = String(formData.get("start_date") || "");
   const endDate = String(formData.get("end_date") || "");
   const resolution = String(formData.get("resolution") || "daily");
+  const fileFormat = String(formData.get("format") || "csv");
   const stationValue = String(formData.get("station") || "");
 
   if (!startDate || !endDate) throw new Error("Choose both start and end dates.");
   if (endDate < startDate) throw new Error("End date must be on or after start date.");
 
-  const params = new URLSearchParams({ start_date: startDate, end_date: endDate, resolution });
+  const params = new URLSearchParams({
+    start_date: startDate,
+    end_date: endDate,
+    resolution,
+    format: fileFormat,
+  });
   if (stationValue) {
     const [platform, stationId] = stationValue.split("::");
+    const selectedStation = stationDropdown?.getSelected?.();
     if (platform) params.set("platform", platform);
     if (stationId) params.set("station_id", stationId);
+    if (selectedStation?.label) params.set("station_name", selectedStation.label);
   }
 
   button.disabled = true;
   const originalText = button.textContent;
-  button.textContent = "Preparing CSV...";
+  button.textContent = `Preparing ${fileFormat.toUpperCase()}...`;
   try {
     const response = await authorizedFetch(`/api/history/export?${params.toString()}`);
     if (!response.ok) {
@@ -328,7 +343,26 @@ async function download(form, button) {
     const blob = await response.blob();
     const disposition = response.headers.get("Content-Disposition") || "";
     const match = disposition.match(/filename="?([^";]+)"?/i);
-    const filename = match?.[1] || `plts-history-${resolution}-${startDate}-to-${endDate}.csv`;
+    const selectedStation = stationDropdown?.getSelected?.();
+    const scope = stationValue ? (selectedStation?.label || "selected-site") : "all-sites";
+    const safeScope = scope
+      .normalize("NFKD")
+      .replace(/[^A-Za-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "history";
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Jakarta",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(now);
+    const part = (type) => parts.find((item) => item.type === type)?.value || "00";
+    const exportedStamp = `${part("year")}-${part("month")}-${part("day")}_${part("hour")}-${part("minute")}-WIB`;
+    const fallbackFilename = `PLTS-History_${safeScope}_${resolution}_${startDate}_to_${endDate}_Exported-${exportedStamp}.${fileFormat}`;
+    const filename = match?.[1] || fallbackFilename;
     const url = URL.createObjectURL(blob);
     const anchor = el("a", { href: url, download: filename });
     document.body.append(anchor);
@@ -396,8 +430,8 @@ function buildWidget() {
   const form = el("form", { className: "history-export-form" });
   const stationDropdown = createDropdown({
     name: "station",
-    ariaLabel: "Select station",
-    options: [{ value: "", label: "All stations", meta: "Fleet" }],
+    ariaLabel: "Select site",
+    options: [{ value: "", label: "All sites", meta: "Fleet" }],
   });
   const startPicker = createDatePicker({ name: "start_date", value: dates.start, ariaLabel: "Select start date" });
   const endPicker = createDatePicker({ name: "end_date", value: dates.end, ariaLabel: "Select end date" });
@@ -407,25 +441,35 @@ function buildWidget() {
     ariaLabel: "Select history resolution",
     options: [
       { value: "daily", label: "Daily", meta: "Long-term rollup" },
-      { value: "hourly", label: "Hourly snapshots", meta: "Up to 31 days" },
+      { value: "hourly", label: "Hourly snapshots", meta: "Up to 1 year" },
+    ],
+  });
+  const formatDropdown = createDropdown({
+    name: "format",
+    value: "xlsx",
+    ariaLabel: "Select download format",
+    options: [
+      { value: "xlsx", label: "Excel (.xlsx)", meta: "Formatted workbook" },
+      { value: "csv", label: "CSV (.csv)", meta: "Universal spreadsheet format" },
     ],
   });
 
   form.append(
-    field("Station", stationDropdown.node),
+    field("Site", stationDropdown.node),
     el("div", { className: "history-export-date-grid" }, [
       field("From", startPicker.node, "history-date-field"),
       field("To", endPicker.node, "history-date-field"),
     ]),
     field("Resolution", resolutionDropdown.node),
+    field("Format", formatDropdown.node),
     el("p", {
       className: "history-export-note",
-      text: "CSV opens directly in Excel or Google Sheets. Hourly data follows snapshot retention; daily data uses the long-term rollup table.",
+      text: "Choose Excel (.xlsx) for a formatted workbook or CSV for a lightweight universal file. Filenames include the selected site scope, date range, and export time in WIB.",
     }),
   );
 
   const error = el("div", { id: "history-export-error", className: "history-export-error", role: "alert", hidden: "" });
-  const submit = el("button", { type: "submit", className: "history-export-submit", text: "Download CSV" });
+  const submit = el("button", { type: "submit", className: "history-export-submit", text: "Download history" });
   form.append(error, submit);
   panel.append(head, form);
   modal.append(backdrop, panel);
@@ -438,7 +482,7 @@ function buildWidget() {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      await download(form, submit);
+      await download(form, submit, stationDropdown);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
